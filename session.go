@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rsa"
+	"fmt"
 	"time"
 )
 
@@ -39,7 +40,11 @@ func InitiateSession(me, other Profile) (*Session, Request, error) {
 
 // creates a session based on already having accepted a Request.
 func BeginSession(me Profile, req Request) (*Session, Response, error) {
-	// TODO: check that request isn't stale (older than session timeout)
+	// check that request isn't stale (older than session timeout)
+	if time.Since(req.TimeStamp.Time()) > SessionIdleTimeout {
+		return nil, Response{}, fmt.Errorf("request is stale")
+	}
+
 	respReq, privKey, err := PrepareRequest(me)
 	if err != nil {
 		return nil, Response{}, err
@@ -81,9 +86,42 @@ func (s *Session) ExtendExpiration() {
 	s.Expires = time.Now().Add(SessionIdleTimeout)
 }
 
+func (s *Session) IsExpired() bool { return time.Now().After(s.Expires) }
+
 func (s *Session) ID() string { return s.Other.FullAddress() }
 
+func (s *Session) Upgrade(resp Response) error {
+	if s.Status != Pending {
+		return fmt.Errorf("session is not Pending")
+	}
+
+	sharedKey, err := RSADecrypt(resp.SharedKey, s.PrivKey)
+	if err != nil {
+		return err
+	}
+	if !ValidSignatureRSA512(resp.KeySignature, resp.SharedKey, &resp.Request.PublicKey) {
+		return fmt.Errorf("invalid signature")
+	}
+
+	// shared key is now decrypted and the signature is valid
+	// upgrade session
+	s.Status = Active
+	s.SharedKey = sharedKey
+	s.OtherPubKey = &resp.Request.PublicKey
+	s.Other = resp.Request.Profile
+
+	s.ExtendExpiration()
+	return nil
+}
+
 func (s *Session) SendText(message string) error {
+	if s.Status != Active {
+		return fmt.Errorf("session not Active")
+	}
+	if s.IsExpired() {
+		return fmt.Errorf("session expired")
+	}
+
 	text := Text{
 		Message:   message,
 		TimeStamp: Now(),
@@ -94,7 +132,13 @@ func (s *Session) SendText(message string) error {
 		return err
 	}
 
-	return Send(s.Other.FullAddress(), m)
+	err = Send(s.Other.FullAddress(), m)
+	if err != nil {
+		return err
+	}
+
+	s.ExtendExpiration()
+	return nil
 }
 
 func (s *Session) SendRequest(req Request) error {
@@ -107,6 +151,7 @@ func (s *Session) SendRequest(req Request) error {
 }
 
 func (s *Session) SendResponse(resp Response) error {
+
 	m, err := PackageResponse(resp)
 	if err != nil {
 		return err
