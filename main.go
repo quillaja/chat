@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -19,7 +20,6 @@ import (
 
 func main() {
 	meProfile := flag.String("profile", "", "profile")
-	// toProfile := flag.String("to", "", "send to profile")
 	contactsFile := flag.String("contacts", "", "contacts")
 	flag.Parse()
 
@@ -53,12 +53,20 @@ func main() {
 				done = true
 				cancel()
 
+			case ".ip":
+				ip, err := GetIP()
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				fmt.Printf("external IP address:\t%s\nlistening on port:\t%s\n", ip, app.Me.Port)
+
 			case ".me":
 				fmt.Printf("I am %s\n", app.Me)
 
 			case ".contacts":
-				for k, c := range app.Contacts {
-					fmt.Printf("%s\t%s\n", k, c)
+				for i, c := range app.Contacts {
+					fmt.Printf("%d\t%s\n", i, c)
 				}
 
 			case ".requests":
@@ -74,18 +82,23 @@ func main() {
 					fmt.Printf("%d\t%s\n", i, s)
 				}
 
-			case ".ping": // .ping [contact key]
+			case ".ping": // .ping [contact number]
 				if rest == "" {
-					log.Println(".ping [contact key]")
+					log.Println(".ping [contact number]")
 					continue
 				}
-				key := strings.SplitN(rest, " ", 2)[0]
-				other, ok := app.Contacts[key]
-				if !ok {
-					log.Printf("no contact with address %s\n", key)
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
 					continue
 				}
-				err := app.SendRequest(other)
+				if n < 0 || n >= len(app.Contacts) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				err = app.SendRequest(app.Contacts[n])
 				if err != nil {
 					log.Println(err)
 				}
@@ -102,7 +115,7 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n > len(app.Sessions) {
+				if n < 0 || n >= len(app.Sessions) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
@@ -121,7 +134,7 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n > len(app.requests) {
+				if n < 0 || n >= len(app.requests) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
@@ -144,7 +157,7 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n > len(app.requests) {
+				if n < 0 || n >= len(app.requests) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
@@ -163,7 +176,7 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n > len(app.Sessions) {
+				if n < 0 || n >= len(app.Sessions) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
@@ -204,9 +217,20 @@ func console(cmdQueue chan []string) {
 	}
 }
 
+func GetIP() (ip string, err error) {
+	resp, err := http.Get("http://checkip.amazonaws.com/")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	_, err = fmt.Fscan(resp.Body, &ip)
+	return
+}
+
 type Application struct {
 	Me       Profile
-	Contacts map[string]Profile
+	Contacts []Profile
 	Sessions []*Session
 	queue    chan *Message
 	requests []Request // requests needing approval
@@ -221,7 +245,7 @@ func NewApplication(profilePath, contactsPath string) (*Application, error) {
 	contacts, err := ReadContacts(contactsPath)
 	if err != nil {
 		log.Println(err)
-		contacts = make(map[string]Profile)
+		contacts = make([]Profile, 0)
 	}
 
 	return &Application{

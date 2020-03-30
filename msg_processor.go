@@ -66,8 +66,9 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				// try decrypting the message with each session shared key until
 				// one works... =/
 				var sess *Session
+				var sessNumber int
 				var text Text
-				for _, s := range app.Sessions {
+				for i, s := range app.Sessions {
 					if s.Status != Active {
 						continue
 					}
@@ -75,6 +76,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 					t, err := m.GetText(s.SharedKey)
 					if err == nil {
 						sess = s
+						sessNumber = i
 						text = t
 						break
 					}
@@ -82,7 +84,11 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 
 				if sess != nil {
 					sess.ExtendExpiration()
-					fmt.Printf(" %s | %s > %s\n", sess.Other, text.Time().Format(time.Kitchen), text.Message)
+					fmt.Printf("(%d) %s | %s >\n\t%s\n",
+						sessNumber,
+						sess.Other,
+						text.Time().Format(time.Kitchen),
+						text.Message)
 				} else {
 					log.Println("got non-sessioned messaged")
 				}

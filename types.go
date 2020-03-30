@@ -66,32 +66,18 @@ func ReadProfile(filename string) (p Profile, err error) {
 	return
 }
 
-func ReadContacts(filename string) (contacts map[string]Profile, err error) {
+func ReadContacts(filename string) (contacts []Profile, err error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return
 	}
 
-	var c []Profile
-	err = json.Unmarshal(data, &c)
-	if err != nil {
-		return
-	}
-
-	contacts = make(map[string]Profile, len(c))
-	for _, p := range c {
-		contacts[p.FullAddress()] = p
-	}
+	err = json.Unmarshal(data, &contacts)
 	return
 }
 
-func WriteContacts(contacts map[string]Profile, filename string) error {
-	c := make([]Profile, len(contacts))
-	for _, p := range contacts {
-		c = append(c, p)
-	}
-
-	data, err := json.MarshalIndent(c, "", "  ")
+func WriteContacts(contacts []Profile, filename string) error {
+	data, err := json.MarshalIndent(contacts, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -102,3 +88,5 @@ func WriteContacts(contacts map[string]Profile, filename string) error {
 func (p Profile) FullAddress() string { return p.Address + ":" + p.Port }
 
 func (p Profile) String() string { return p.Name + "@" + p.FullAddress() }
+
+func (p Profile) Equal(o Profile) bool { return p.FullAddress() == o.FullAddress() }
