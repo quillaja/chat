@@ -25,15 +25,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				}
 
 				app.requests = append(app.requests, request)
-
-				// var confirm string
-				// fmt.Printf("accept request from %s? [y/n] ", request.Profile)
-				// fmt.Scan(&confirm)
-				// if strings.ToLower(confirm) != "y" {
-				// 	log.Println("denied")
-				// 	continue
-				// }
-				// log.Println("accepted")
+				log.Printf("got request from %s\n", request.Profile)
 
 			case PayloadResponse:
 				resp, err := m.GetResponse()
@@ -47,9 +39,10 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				// 2. "upgrade" session to Active. fill in SharedKey and OtherPubKey
 				var sess *Session
 				for _, s := range app.Sessions {
-					err := s.Upgrade(resp)
+					err := s.Upgrade(resp) // upgrade will only work with correct key
 					if err == nil {
 						sess = s // found correct session
+						// TODO: ?? modify contact list with (potentially) updated Profile?
 						break
 					}
 				}

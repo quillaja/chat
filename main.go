@@ -62,12 +62,25 @@ func main() {
 				fmt.Printf("external IP address:\t%s\nlistening on port:\t%s\n", ip, app.Me.Port)
 
 			case ".me":
-				fmt.Printf("I am %s\n", app.Me)
+				fmt.Printf("I am \"%s\"\n", app.Me)
 
-			case ".contacts":
-				for i, c := range app.Contacts {
-					fmt.Printf("%d\t%s\n", i, c)
+			case ".me-new":
+				if rest == "" {
+					log.Println(".me-new [<name>@<address>:<port>]")
+					continue
 				}
+				p, err := ParseProfile(rest)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				err = WriteProfile(p, *meProfile)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				app.Me = p
 
 			case ".requests":
 				for i, r := range app.requests {
@@ -81,6 +94,86 @@ func main() {
 				for i, s := range app.Sessions {
 					fmt.Printf("%d\t%s\n", i, s)
 				}
+
+			case ".contacts":
+				for i, c := range app.Contacts {
+					fmt.Printf("%d\t%s\n", i, c)
+				}
+
+			case ".add-contact":
+				if rest == "" {
+					log.Println(".add-contact [session number]")
+					continue
+				}
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n >= len(app.Sessions) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				// find index where p == contacts[index]
+				p := app.Sessions[n].Other
+				index := -1
+				for i := range app.Contacts {
+					if p.Equal(app.Contacts[i]) {
+						index = i
+						break
+					}
+				}
+
+				newContacts := make([]Profile, len(app.Contacts))
+				copy(newContacts, app.Contacts)
+				if index >= 0 {
+					old := newContacts[index]
+					newContacts[index] = p
+					log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
+				} else {
+					newContacts = append(newContacts, p)
+					log.Printf("added %s\n", p)
+				}
+
+				err = WriteContacts(newContacts, *contactsFile)
+				if err != nil {
+					log.Println(err)
+					log.Println("no changes saved")
+					continue
+				}
+				app.Contacts = newContacts
+
+			case ".del-contact":
+				if rest == "" {
+					log.Println(".del-contact [contact number]")
+					continue
+				}
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n >= len(app.Contacts) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				p := app.Contacts[n]
+				newContacts := make([]Profile, len(app.Contacts))
+				copy(newContacts, app.Contacts)
+				newContacts = append(newContacts[:n], newContacts[n+1:]...)
+				log.Printf("deleted %s\n", p)
+
+				err = WriteContacts(newContacts, *contactsFile)
+				if err != nil {
+					log.Println(err)
+					log.Println("no changes saved")
+					continue
+				}
+				app.Contacts = newContacts
 
 			case ".ping": // .ping [contact number]
 				if rest == "" {
@@ -101,6 +194,7 @@ func main() {
 				err = app.SendRequest(app.Contacts[n])
 				if err != nil {
 					log.Println(err)
+					continue
 				}
 				log.Println("request sent")
 
@@ -182,7 +276,7 @@ func main() {
 				}
 
 				if len(parts) < 2 {
-					log.Println("no message")
+					log.Println("no message content")
 					continue
 				}
 
@@ -284,6 +378,7 @@ func (app *Application) AcceptRequest(request Request) error {
 		}
 	}
 
+	// TODO: ?? add/modify contact list with new/updated Profile?
 	app.Sessions = append(app.Sessions, sess)
 	log.Printf("began session with %s\n", sess.Other)
 	return nil

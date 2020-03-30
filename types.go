@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"strings"
 	"time"
 )
 
@@ -21,9 +23,9 @@ func Now() TimeStamp                 { return TimeStamp(time.Now().Unix()) }
 func (ts TimeStamp) Time() time.Time { return time.Unix(int64(ts), 0) }
 
 type Profile struct {
-	Name    string
-	Address string // example "61.2.73.242" or "mytld.com"
-	Port    string // port without :
+	Name    string // name. may contain spaces.
+	Address string // example ipv4 "61.2.73.242" or ipv6 "[::1]" or dns "mytld.com"
+	Port    string // port without : (colon)
 }
 
 type Request struct {
@@ -66,6 +68,15 @@ func ReadProfile(filename string) (p Profile, err error) {
 	return
 }
 
+func WriteProfile(p Profile, filename string) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(filename, data, 0644)
+}
+
 func ReadContacts(filename string) (contacts []Profile, err error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -83,6 +94,31 @@ func WriteContacts(contacts []Profile, filename string) error {
 	}
 
 	return ioutil.WriteFile(filename, data, 0644)
+}
+
+func ParseProfile(raw string) (p Profile, err error) {
+	parts := strings.SplitN(raw, "@", 2)
+	if len(parts) < 2 {
+		err = fmt.Errorf("no name")
+		return
+	}
+	p.Name = parts[0]
+
+	parts = strings.Split(parts[1], ":")
+	if len(parts) < 2 {
+		err = fmt.Errorf("no port")
+		return
+	}
+	p.Port = parts[len(parts)-1:][0] // back string. allows ipv6 addresses
+	parts = parts[:len(parts)-1]     // front rest
+
+	if len(parts) < 1 {
+		err = fmt.Errorf("no address")
+		return
+	}
+	p.Address = strings.Join(parts, ":")
+
+	return
 }
 
 func (p Profile) FullAddress() string { return p.Address + ":" + p.Port }
