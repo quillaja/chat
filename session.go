@@ -16,7 +16,7 @@ type Session struct {
 	Expires     time.Time
 }
 
-const SessionIdleTimeout = 30 * time.Minute
+const SessionIdleTimeout = 5 * time.Minute // TODO: increase to sensible number
 
 type SessionStatus string
 

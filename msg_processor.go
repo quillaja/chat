@@ -81,6 +81,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				}
 
 				if sess != nil {
+					sess.ExtendExpiration()
 					fmt.Printf(" %s | %s > %s\n", sess.Other, text.Time().Format(time.Kitchen), text.Message)
 				} else {
 					log.Println("got non-sessioned messaged")

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -87,17 +88,97 @@ func main() {
 				err := app.SendRequest(other)
 				if err != nil {
 					log.Println(err)
-				} else {
-					log.Println("request sent")
 				}
+				log.Println("request sent")
 
 			case ".drop": // .drop [session number]
+				if rest == "" {
+					log.Println(".drop [session number]")
+					continue
+				}
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n > len(app.Sessions) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				app.Sessions = append(app.Sessions[:n], app.Sessions[n+1:]...)
+				log.Println("dropped session")
 
 			case ".accept": // .accept [request number]
+				if rest == "" {
+					log.Println(".accept [request number]")
+					continue
+				}
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n > len(app.requests) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				err = app.AcceptRequest(app.requests[n])
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				log.Println("request accepted")
+
 			case ".reject": // .reject [request number]
+				if rest == "" {
+					log.Println(".reject [request number]")
+					continue
+				}
+				arg := strings.SplitN(rest, " ", 2)[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n > len(app.requests) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				app.requests = append(app.requests[:n], app.requests[n+1:]...)
+				log.Println("removed request")
 
 			case ".msg": // .msg [session number] [text]
-				fmt.Println("sending message to", rest)
+				if rest == "" {
+					log.Println(".msg [session number] [text]")
+					continue
+				}
+				parts = strings.SplitN(rest, " ", 2)
+				n, err := strconv.Atoi(parts[0])
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if n < 0 || n > len(app.Sessions) {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				if len(parts) < 2 {
+					log.Println("no message")
+					continue
+				}
+
+				err = app.Sessions[n].SendText(parts[1])
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				log.Println("sent")
 
 			}
 		}
@@ -118,7 +199,7 @@ func console(cmdQueue chan []string) {
 		if len(parts) == 1 {
 			parts = append(parts, "") //ensure 'rest' always has something
 		}
-		log.Printf("%q\n", parts)
+		// log.Printf("%q\n", parts)
 		cmdQueue <- parts
 	}
 }
@@ -166,6 +247,17 @@ func (app *Application) AcceptRequest(request Request) error {
 	err = sess.SendResponse(resp)
 	if err != nil {
 		return err
+	}
+
+	// remove request from waiting list
+	for i, r := range app.requests {
+		if request == r {
+			// a = a[:i+copy(a[i:], a[i+1:])]
+			//app.requests = app.requests[:i+copy(app.requests[i:], app.requests[i+i:])] // remove request
+			// a = append(a[:i], a[i+1:]...)
+			app.requests = append(app.requests[:i], app.requests[i+1:]...)
+			break
+		}
 	}
 
 	app.Sessions = append(app.Sessions, sess)
