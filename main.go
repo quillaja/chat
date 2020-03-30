@@ -102,22 +102,28 @@ func main() {
 
 			case ".add-contact":
 				if rest == "" {
-					log.Println(".add-contact [session number]")
+					log.Println(".add-contact [session number] OR [<name>@<address>:<port>]")
 					continue
 				}
+				var p Profile
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if n < 0 || n >= len(app.Sessions) {
-					log.Printf("%d not found\n", n)
-					continue
+				if err == nil {
+					if n < 0 || n >= len(app.Sessions) {
+						log.Printf("%d not found\n", n)
+						continue
+					}
+					p = app.Sessions[n].Other
+
+				} else {
+					p, err = ParseProfile(rest)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
 				}
 
 				// find index where p == contacts[index]
-				p := app.Sessions[n].Other
 				index := -1
 				for i := range app.Contacts {
 					if p.Equal(app.Contacts[i]) {
