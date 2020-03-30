@@ -6,13 +6,14 @@ import (
 	"encoding/gob"
 	"log"
 	"net"
+	"time"
 )
 
 // port without :
-func Listener(ctx context.Context, port string, msgQueue chan *Message) error {
+func (app *Application) Listener(ctx context.Context) error {
 	const maxBufferSize = 4096
 
-	listenAddress, err := net.ResolveUDPAddr("udp", ":"+port)
+	listenAddress, err := net.ResolveUDPAddr("udp", ":"+app.Me.Port)
 	if err != nil {
 		return err
 	}
@@ -31,12 +32,12 @@ func Listener(ctx context.Context, port string, msgQueue chan *Message) error {
 
 		default:
 			buf := make([]byte, maxBufferSize)
-			_, _, errRead := conn.ReadFrom(buf)
+			conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			_, addr, errRead := conn.ReadFrom(buf) // blocking read
 			if errRead == nil {
-				// log.Printf("read %d bytes fron udp\n", n)
-				go processData(buf, msgQueue)
+				go processData(buf, addr.String(), app.queue)
 			} else {
-				log.Println(err)
+				//log.Println(errRead) // expect io timeout error
 			}
 		}
 	}
@@ -46,7 +47,7 @@ func Listener(ctx context.Context, port string, msgQueue chan *Message) error {
 }
 
 // transform []byte to Message
-func processData(b []byte, msgQueue chan *Message) {
+func processData(b []byte, addr string, msgQueue chan *Message) {
 	var m Message
 
 	buf := bytes.NewBuffer(b)

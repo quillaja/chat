@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rsa"
+	"encoding/base64"
 	"fmt"
 	"time"
 )
@@ -17,11 +18,11 @@ type Session struct {
 
 const SessionIdleTimeout = 30 * time.Minute
 
-type SessionStatus byte
+type SessionStatus string
 
 const (
-	Pending SessionStatus = iota
-	Active
+	Pending SessionStatus = "pending"
+	Active  SessionStatus = "active"
 )
 
 // creates a session based on intention to send Request to other.
@@ -88,7 +89,12 @@ func (s *Session) ExtendExpiration() {
 
 func (s *Session) IsExpired() bool { return time.Now().After(s.Expires) }
 
-func (s *Session) ID() string { return s.Other.FullAddress() }
+func (s *Session) String() string {
+	return fmt.Sprintf("[%s] %s\tleft: %s\tkey: %s",
+		s.Status, s.Other,
+		time.Until(s.Expires),
+		base64.RawStdEncoding.EncodeToString(s.SharedKey))
+}
 
 func (s *Session) Upgrade(resp Response) error {
 	if s.Status != Pending {
