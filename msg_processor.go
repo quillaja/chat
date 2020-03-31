@@ -77,6 +77,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 
 				if sess != nil {
 					sess.ExtendExpiration()
+					// TODO: change to use future 'ui' interface
 					fmt.Printf("(%d) %s | %s >\n\t%s\n",
 						sessNumber,
 						sess.Other,

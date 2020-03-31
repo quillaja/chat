@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,11 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"context"
 )
-
-// http://checkip.amazonaws.com/
 
 func main() {
 	meProfile := flag.String("profile", "", "profile")
@@ -27,6 +25,20 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	// output stuff
+	output := Color(os.Stdout, Green)
+	null, _ := os.Open(os.DevNull)
+	defer null.Close()
+	enableLog := func(on bool) {
+		if on {
+			log.SetOutput(Color(os.Stderr, BrightBlack)) // NOTE: color will break in windows terminals
+		} else {
+			log.SetOutput(null)
+		}
+	}
+	log.SetPrefix("  ")
+	enableLog(true)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go app.Listener(ctx)
@@ -59,10 +71,10 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				fmt.Printf("external IP address:\t%s\nlistening on port:\t%s\n", ip, app.Me.Port)
+				fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, app.Me.Port)
 
 			case ".me":
-				fmt.Printf("I am \"%s\"\n", app.Me)
+				fmt.Fprintf(output, "I am \"%s\"\n", app.Me)
 
 			case ".me-new":
 				if rest == "" {
@@ -84,7 +96,7 @@ func main() {
 
 			case ".requests":
 				for i, r := range app.requests {
-					fmt.Printf("%d\t%s at %s (%s ago)\n", i,
+					fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
 						r.Profile,
 						r.Time().Format(time.Kitchen),
 						time.Since(r.Time()))
@@ -92,12 +104,12 @@ func main() {
 
 			case ".sessions":
 				for i, s := range app.Sessions {
-					fmt.Printf("%d\t%s\n", i, s)
+					fmt.Fprintf(output, "%d\t%s\n", i, s)
 				}
 
 			case ".contacts":
 				for i, c := range app.Contacts {
-					fmt.Printf("%d\t%s\n", i, c)
+					fmt.Fprintf(output, "%d\t%s\n", i, c)
 				}
 
 			case ".add-contact":
@@ -123,18 +135,11 @@ func main() {
 					}
 				}
 
-				// find index where p == contacts[index]
-				index := -1
-				for i := range app.Contacts {
-					if p.Equal(app.Contacts[i]) {
-						index = i
-						break
-					}
-				}
-
+				// copy and alter copy
+				// to allow "revert" if write-to-disk fails
 				newContacts := make([]Profile, len(app.Contacts))
 				copy(newContacts, app.Contacts)
-				if index >= 0 {
+				if index := searchProfiles(app.Contacts, p); index >= 0 {
 					old := newContacts[index]
 					newContacts[index] = p
 					log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
@@ -167,11 +172,12 @@ func main() {
 					continue
 				}
 
-				p := app.Contacts[n]
+				// copy and alter copy
+				// to allow "revert" if write-to-disk fails
 				newContacts := make([]Profile, len(app.Contacts))
 				copy(newContacts, app.Contacts)
 				newContacts = append(newContacts[:n], newContacts[n+1:]...)
-				log.Printf("deleted %s\n", p)
+				log.Printf("deleted %s\n", app.Contacts[n])
 
 				err = WriteContacts(newContacts, *contactsFile)
 				if err != nil {
@@ -183,21 +189,30 @@ func main() {
 
 			case ".ping": // .ping [contact number]
 				if rest == "" {
-					log.Println(".ping [contact number]")
+					log.Println(".ping [contact number] OR [<name>@<address>:<port>]")
 					continue
 				}
+				var p Profile
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if n < 0 || n >= len(app.Contacts) {
-					log.Printf("%d not found\n", n)
-					continue
+				if err == nil {
+					if n < 0 || n >= len(app.Contacts) {
+						log.Printf("%d not found\n", n)
+						continue
+					}
+					p = app.Contacts[n]
+				} else {
+					p, err = ParseProfile(rest)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					if i := searchProfiles(app.Contacts, p); i >= 0 {
+						p = app.Contacts[i] // use profile from contacts if available
+					}
 				}
 
-				err = app.SendRequest(app.Contacts[n])
+				err = app.SendRequest(p)
 				if err != nil {
 					log.Println(err)
 					continue
@@ -317,7 +332,56 @@ func console(cmdQueue chan []string) {
 	}
 }
 
+const (
+	wrapper       = "\x1B[%sm"
+	reset         = "\x1B[0m"
+	Black         = "30"
+	Red           = "31"
+	Green         = "32"
+	Yellow        = "33"
+	Blue          = "34"
+	Magenta       = "35"
+	Cyan          = "36"
+	White         = "37"
+	BrightBlack   = "90"
+	BrightRed     = "91"
+	BrightGreen   = "92"
+	BrightYellow  = "93"
+	BrightBlue    = "94"
+	BrightMagenta = "95"
+	BrightCyan    = "96"
+	BrightWhite   = "97"
+)
+
+func Color(w io.Writer, color string) io.Writer {
+	return scw{
+		writer: w,
+		color:  fmt.Sprintf(wrapper, color),
+	}
+}
+
+type scw struct {
+	writer io.Writer
+	color  string
+}
+
+func (w scw) Write(b []byte) (n int, err error) {
+	return w.writer.Write([]byte(w.color + string(b) + reset))
+}
+
+// returns first index where list contains a profile Equal() to p, or -1
+// if not found.
+func searchProfiles(list []Profile, p Profile) int {
+	for i := range list {
+		if p.Equal(list[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
 func GetIP() (ip string, err error) {
+	// uses just amazon, but could use multiple/alt
 	resp, err := http.Get("http://checkip.amazonaws.com/")
 	if err != nil {
 		return
