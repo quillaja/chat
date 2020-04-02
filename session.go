@@ -11,7 +11,7 @@ type Session struct {
 	Status      SessionStatus
 	PrivKey     *rsa.PrivateKey
 	SharedKey   []byte
-	Other       Profile
+	Other       *Profile
 	OtherPubKey *rsa.PublicKey
 	Expires     time.Time
 }
@@ -26,7 +26,7 @@ const (
 )
 
 // creates a session based on intention to send Request to other.
-func InitiateSession(me, other Profile) (*Session, Request, error) {
+func InitiateSession(me, other *Profile) (*Session, *Request, error) {
 	req, privKey, err := PrepareRequest(me)
 	s := &Session{
 		Status:  Pending,
@@ -40,31 +40,31 @@ func InitiateSession(me, other Profile) (*Session, Request, error) {
 }
 
 // creates a session based on already having accepted a Request.
-func BeginSession(me Profile, req Request) (*Session, Response, error) {
+func BeginSession(me *Profile, req *Request) (*Session, *Response, error) {
 	// check that request isn't stale (older than session timeout)
 	if time.Since(req.TimeStamp.Time()) > SessionIdleTimeout {
-		return nil, Response{}, fmt.Errorf("request is stale")
+		return nil, nil, fmt.Errorf("request is stale")
 	}
 
 	respReq, privKey, err := PrepareRequest(me)
 	if err != nil {
-		return nil, Response{}, err
+		return nil, nil, err
 	}
 
 	k, err := GenerateAES256Key()
 	if err != nil {
-		return nil, Response{}, err
+		return nil, nil, err
 	}
 	encKey, err := RSAEncrypt(k, &req.PublicKey)
 	if err != nil {
-		return nil, Response{}, err
+		return nil, nil, err
 	}
 	signature, err := SignRSA512(encKey, privKey)
 	if err != nil {
-		return nil, Response{}, err
+		return nil, nil, err
 	}
 
-	resp := Response{
+	resp := &Response{
 		Request:      respReq,
 		SharedKey:    encKey,
 		KeySignature: signature,
@@ -96,7 +96,7 @@ func (s *Session) String() string {
 		base64.RawStdEncoding.EncodeToString(s.SharedKey))
 }
 
-func (s *Session) Upgrade(resp Response) error {
+func (s *Session) Upgrade(resp *Response) error {
 	if s.Status != Pending {
 		return fmt.Errorf("session is not Pending")
 	}
@@ -128,7 +128,7 @@ func (s *Session) SendText(message string) error {
 		return fmt.Errorf("session expired")
 	}
 
-	text := Text{
+	text := &Text{
 		Message:   message,
 		TimeStamp: Now(),
 	}
@@ -147,7 +147,7 @@ func (s *Session) SendText(message string) error {
 	return nil
 }
 
-func (s *Session) SendRequest(req Request) error {
+func (s *Session) SendRequest(req *Request) error {
 	m, err := PackageRequest(req)
 	if err != nil {
 		return err
@@ -156,7 +156,7 @@ func (s *Session) SendRequest(req Request) error {
 	return Send(s.Other.FullAddress(), m)
 }
 
-func (s *Session) SendResponse(resp Response) error {
+func (s *Session) SendResponse(resp *Response) error {
 
 	m, err := PackageResponse(resp)
 	if err != nil {

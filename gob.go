@@ -25,20 +25,20 @@ func gobDecode(b []byte, plType PayloadType) interface{} {
 
 	switch plType {
 	case PayloadText:
-		var x Text
-		if dec().Decode(&x) == nil {
+		x := &Text{}
+		if dec().Decode(x) == nil {
 			return x
 		}
 
 	case PayloadRequest:
-		var x Request
-		if dec().Decode(&x) == nil {
+		x := &Request{}
+		if dec().Decode(x) == nil {
 			return x
 		}
 
 	case PayloadResponse:
-		var x Response
-		if dec().Decode(&x) == nil {
+		x := &Response{}
+		if dec().Decode(x) == nil {
 			return x
 		}
 	}

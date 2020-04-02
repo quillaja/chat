@@ -24,7 +24,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 					continue
 				}
 
-				app.requests = append(app.requests, request)
+				app.Requests = append(app.Requests, request)
 				log.Printf("got request from %s\n", request.Profile)
 
 			case PayloadResponse:
@@ -50,7 +50,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				if sess != nil {
 					log.Printf("began session with %s\n", sess.Other)
 				} else {
-					log.Printf("no session found for Response from %s\n", resp.Profile)
+					log.Printf("no session found for Response from %s\n", resp.Request.Profile)
 				}
 
 			case PayloadText:
@@ -60,7 +60,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				// one works... =/
 				var sess *Session
 				var sessNumber int
-				var text Text
+				var text *Text
 				for i, s := range app.Sessions {
 					if s.Status != Active {
 						continue

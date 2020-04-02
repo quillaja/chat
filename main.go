@@ -95,7 +95,7 @@ func main() {
 				app.Me = p
 
 			case ".requests":
-				for i, r := range app.requests {
+				for i, r := range app.Requests {
 					fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
 						r.Profile,
 						r.Time().Format(time.Kitchen),
@@ -117,7 +117,7 @@ func main() {
 					log.Println(".add-contact [session number] OR [<name>@<address>:<port>]")
 					continue
 				}
-				var p Profile
+				var p *Profile
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
 				if err == nil {
@@ -137,7 +137,7 @@ func main() {
 
 				// copy and alter copy
 				// to allow "revert" if write-to-disk fails
-				newContacts := make([]Profile, len(app.Contacts))
+				newContacts := make([]*Profile, len(app.Contacts))
 				copy(newContacts, app.Contacts)
 				if index := searchProfiles(app.Contacts, p); index >= 0 {
 					old := newContacts[index]
@@ -174,7 +174,7 @@ func main() {
 
 				// copy and alter copy
 				// to allow "revert" if write-to-disk fails
-				newContacts := make([]Profile, len(app.Contacts))
+				newContacts := make([]*Profile, len(app.Contacts))
 				copy(newContacts, app.Contacts)
 				newContacts = append(newContacts[:n], newContacts[n+1:]...)
 				log.Printf("deleted %s\n", app.Contacts[n])
@@ -192,7 +192,7 @@ func main() {
 					log.Println(".ping [contact number] OR [<name>@<address>:<port>]")
 					continue
 				}
-				var p Profile
+				var p *Profile
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
 				if err == nil {
@@ -249,12 +249,12 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.requests) {
+				if n < 0 || n >= len(app.Requests) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
 
-				err = app.AcceptRequest(app.requests[n])
+				err = app.AcceptRequest(app.Requests[n])
 				if err != nil {
 					log.Println(err)
 					continue
@@ -272,12 +272,12 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.requests) {
+				if n < 0 || n >= len(app.Requests) {
 					log.Printf("%d not found\n", n)
 					continue
 				}
 
-				app.requests = append(app.requests[:n], app.requests[n+1:]...)
+				app.Requests = append(app.Requests[:n], app.Requests[n+1:]...)
 				log.Println("removed request")
 
 			case ".msg": // .msg [session number] [text]
@@ -371,7 +371,7 @@ func (w scw) Write(b []byte) (n int, err error) {
 
 // returns first index where list contains a profile Equal() to p, or -1
 // if not found.
-func searchProfiles(list []Profile, p Profile) int {
+func searchProfiles(list []*Profile, p *Profile) int {
 	for i := range list {
 		if p.Equal(list[i]) {
 			return i
@@ -393,11 +393,11 @@ func GetIP() (ip string, err error) {
 }
 
 type Application struct {
-	Me       Profile
-	Contacts []Profile
+	Me       *Profile
+	Contacts []*Profile
 	Sessions []*Session
+	Requests []*Request // requests needing approval
 	queue    chan *Message
-	requests []Request // requests needing approval
 }
 
 func NewApplication(profilePath, contactsPath string) (*Application, error) {
@@ -409,19 +409,19 @@ func NewApplication(profilePath, contactsPath string) (*Application, error) {
 	contacts, err := ReadContacts(contactsPath)
 	if err != nil {
 		log.Println(err)
-		contacts = make([]Profile, 0)
+		contacts = make([]*Profile, 0)
 	}
 
 	return &Application{
 		Me:       me,
 		Contacts: contacts,
 		Sessions: make([]*Session, 0),
+		Requests: make([]*Request, 0),
 		queue:    make(chan *Message, 8),
-		requests: make([]Request, 0),
 	}, nil
 }
 
-func (app *Application) AcceptRequest(request Request) error {
+func (app *Application) AcceptRequest(request *Request) error {
 	// after accepting a request.
 	// 1. begin new (active) session
 	// 2. send response
@@ -438,12 +438,12 @@ func (app *Application) AcceptRequest(request Request) error {
 	}
 
 	// remove request from waiting list
-	for i, r := range app.requests {
+	for i, r := range app.Requests {
 		if request == r {
 			// a = a[:i+copy(a[i:], a[i+1:])]
 			//app.requests = app.requests[:i+copy(app.requests[i:], app.requests[i+i:])] // remove request
 			// a = append(a[:i], a[i+1:]...)
-			app.requests = append(app.requests[:i], app.requests[i+1:]...)
+			app.Requests = append(app.Requests[:i], app.Requests[i+1:]...)
 			break
 		}
 	}
@@ -454,7 +454,7 @@ func (app *Application) AcceptRequest(request Request) error {
 	return nil
 }
 
-func (app *Application) SendRequest(to Profile) error {
+func (app *Application) SendRequest(to *Profile) error {
 	sess, req, err := InitiateSession(app.Me, to)
 	if err != nil {
 		return err

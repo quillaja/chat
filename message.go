@@ -46,7 +46,7 @@ const (
 )
 
 // attempts to decrypt and decode the Message into a Request.
-func (m *Message) GetRequest() (req Request, err error) {
+func (m *Message) GetRequest() (req *Request, err error) {
 	if !m.Verify(ZeroKey) {
 		err = fmt.Errorf("invalid signature")
 		return
@@ -57,7 +57,7 @@ func (m *Message) GetRequest() (req Request, err error) {
 		return
 	}
 
-	req, ok := gobDecode(data, m.Type).(Request)
+	req, ok := gobDecode(data, m.Type).(*Request)
 	if !ok {
 		err = fmt.Errorf("message type wasn't Request")
 		return
@@ -68,7 +68,7 @@ func (m *Message) GetRequest() (req Request, err error) {
 
 // attempts to decrypt and decode the Message into a Response.
 // SharedKey remains encrypted.
-func (m *Message) GetResponse() (resp Response, err error) {
+func (m *Message) GetResponse() (resp *Response, err error) {
 	if !m.Verify(ZeroKey) {
 		err = fmt.Errorf("invalid signature")
 		return
@@ -79,7 +79,7 @@ func (m *Message) GetResponse() (resp Response, err error) {
 		return
 	}
 
-	resp, ok := gobDecode(data, m.Type).(Response)
+	resp, ok := gobDecode(data, m.Type).(*Response)
 	if !ok {
 		err = fmt.Errorf("message type wasn't Response")
 		return
@@ -89,7 +89,7 @@ func (m *Message) GetResponse() (resp Response, err error) {
 }
 
 // attempts to decrypt and decode the Message into a Text (using shared key).
-func (m *Message) GetText(sharedKey []byte) (t Text, err error) {
+func (m *Message) GetText(sharedKey []byte) (t *Text, err error) {
 	if !m.Verify(sharedKey) {
 		err = fmt.Errorf("invalid signature")
 		return
@@ -100,7 +100,7 @@ func (m *Message) GetText(sharedKey []byte) (t Text, err error) {
 		return
 	}
 
-	t, ok := gobDecode(data, m.Type).(Text)
+	t, ok := gobDecode(data, m.Type).(*Text)
 	if !ok {
 		err = fmt.Errorf("message type wasn't Text")
 		return
@@ -110,7 +110,7 @@ func (m *Message) GetText(sharedKey []byte) (t Text, err error) {
 }
 
 // make it easier to make a Message from Request
-func PackageRequest(req Request) (m *Message, err error) {
+func PackageRequest(req *Request) (m *Message, err error) {
 	data, err := gobEncode(req)
 	if err != nil {
 		return
@@ -125,7 +125,7 @@ func PackageRequest(req Request) (m *Message, err error) {
 }
 
 // make it easier to make a Message from Response
-func PackageResponse(resp Response) (m *Message, err error) {
+func PackageResponse(resp *Response) (m *Message, err error) {
 	data, err := gobEncode(resp)
 	if err != nil {
 		return
@@ -140,7 +140,7 @@ func PackageResponse(resp Response) (m *Message, err error) {
 }
 
 // make it easier to make a Message from Text
-func PackageText(t Text, sharedKey []byte) (m *Message, err error) {
+func PackageText(t *Text, sharedKey []byte) (m *Message, err error) {
 	data, err := gobEncode(t)
 	if err != nil {
 		return

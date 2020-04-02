@@ -29,13 +29,13 @@ type Profile struct {
 }
 
 type Request struct {
-	Profile
-	rsa.PublicKey
+	Profile   *Profile
+	PublicKey rsa.PublicKey
 	TimeStamp // unix time in seconds
 }
 
 type Response struct {
-	Request
+	Request      *Request
 	SharedKey    []byte // RSA encrypted proposed shared key (32 bytes) for this session
 	KeySignature []byte // RSA signature for SharedKey
 }
@@ -45,13 +45,13 @@ type Text struct {
 	TimeStamp
 }
 
-func PrepareRequest(p Profile) (Request, *rsa.PrivateKey, error) {
+func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
 	privateKey, err := GenerateRSAKeyPair()
 	if err != nil {
-		return Request{}, nil, err
+		return nil, nil, err
 	}
 
-	r := Request{
+	r := &Request{
 		Profile:   p,
 		TimeStamp: Now(),
 		PublicKey: privateKey.PublicKey,
@@ -59,16 +59,17 @@ func PrepareRequest(p Profile) (Request, *rsa.PrivateKey, error) {
 	return r, privateKey, nil
 }
 
-func ReadProfile(filename string) (p Profile, err error) {
+func ReadProfile(filename string) (*Profile, error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return
+		return nil, err
 	}
-	err = json.Unmarshal(data, &p)
-	return
+	p := &Profile{}
+	err = json.Unmarshal(data, p)
+	return p, err
 }
 
-func WriteProfile(p Profile, filename string) error {
+func WriteProfile(p *Profile, filename string) error {
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err
@@ -77,7 +78,7 @@ func WriteProfile(p Profile, filename string) error {
 	return ioutil.WriteFile(filename, data, 0644)
 }
 
-func ReadContacts(filename string) (contacts []Profile, err error) {
+func ReadContacts(filename string) (contacts []*Profile, err error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return
@@ -87,7 +88,7 @@ func ReadContacts(filename string) (contacts []Profile, err error) {
 	return
 }
 
-func WriteContacts(contacts []Profile, filename string) error {
+func WriteContacts(contacts []*Profile, filename string) error {
 	data, err := json.MarshalIndent(contacts, "", "  ")
 	if err != nil {
 		return err
@@ -96,33 +97,31 @@ func WriteContacts(contacts []Profile, filename string) error {
 	return ioutil.WriteFile(filename, data, 0644)
 }
 
-func ParseProfile(raw string) (p Profile, err error) {
+func ParseProfile(raw string) (*Profile, error) {
+	p := &Profile{}
 	parts := strings.SplitN(raw, "@", 2)
 	if len(parts) < 2 {
-		err = fmt.Errorf("no name")
-		return
+		return nil, fmt.Errorf("no name")
 	}
 	p.Name = parts[0]
 
 	parts = strings.Split(parts[1], ":")
 	if len(parts) < 2 {
-		err = fmt.Errorf("no port")
-		return
+		return nil, fmt.Errorf("no port")
 	}
 	p.Port = parts[len(parts)-1:][0] // back string. allows ipv6 addresses
 	parts = parts[:len(parts)-1]     // front rest
 
 	if len(parts) < 1 {
-		err = fmt.Errorf("no address")
-		return
+		return nil, fmt.Errorf("no address")
 	}
 	p.Address = strings.Join(parts, ":")
 
-	return
+	return p, nil
 }
 
-func (p Profile) FullAddress() string { return p.Address + ":" + p.Port }
+func (p *Profile) FullAddress() string { return p.Address + ":" + p.Port }
 
-func (p Profile) String() string { return p.Name + "@" + p.FullAddress() }
+func (p *Profile) String() string { return p.Name + "@" + p.FullAddress() }
 
-func (p Profile) Equal(o Profile) bool { return p.FullAddress() == o.FullAddress() }
+func (p *Profile) Equal(o *Profile) bool { return p.FullAddress() == o.FullAddress() }
