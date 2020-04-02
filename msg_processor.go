@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-func (app *Application) MessageProcessor(ctx context.Context) {
+func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 	var done bool
 	for !done {
 		select {
 		case <-ctx.Done():
 			done = true
 
-		case m := <-app.queue:
+		case m := <-eng.queue:
 
 			switch m.Type {
 			case PayloadRequest:
@@ -24,7 +24,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 					continue
 				}
 
-				app.Requests = append(app.Requests, request)
+				eng.Requests = append(eng.Requests, request)
 				log.Printf("got request from %s\n", request.Profile)
 
 			case PayloadResponse:
@@ -38,7 +38,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				// 1. find Pending session whose PrivKey can decrypt the shared key. (check sig using other pub key)
 				// 2. "upgrade" session to Active. fill in SharedKey and OtherPubKey
 				var sess *Session
-				for _, s := range app.Sessions {
+				for _, s := range eng.Sessions {
 					err := s.Upgrade(resp) // upgrade will only work with correct key
 					if err == nil {
 						sess = s // found correct session
@@ -61,8 +61,8 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 				var sess *Session
 				var sessNumber int
 				var text *Text
-				for i, s := range app.Sessions {
-					if s.Status != Active {
+				for i, s := range eng.Sessions {
+					if s == nil || s.Status != Active {
 						continue
 					}
 
@@ -84,7 +84,7 @@ func (app *Application) MessageProcessor(ctx context.Context) {
 						text.Time().Format(time.Kitchen),
 						text.Message)
 				} else {
-					log.Println("got non-sessioned messaged")
+					log.Println("got non-sessioned message")
 				}
 			}
 		}

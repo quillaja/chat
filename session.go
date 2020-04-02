@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
@@ -27,6 +28,10 @@ const (
 
 // creates a session based on intention to send Request to other.
 func InitiateSession(me, other *Profile) (*Session, *Request, error) {
+	if other == nil {
+		return nil, nil, fmt.Errorf("nil Profile")
+	}
+
 	req, privKey, err := PrepareRequest(me)
 	s := &Session{
 		Status:  Pending,
@@ -96,6 +101,15 @@ func (s *Session) String() string {
 		base64.RawStdEncoding.EncodeToString(s.SharedKey))
 }
 
+// Equal compares sessions based on fields: Status, Expires, SharedKey, and Other.
+func (s *Session) Equal(o *Session) bool {
+	return o != nil &&
+		s.Status == o.Status &&
+		s.Expires.Equal(o.Expires) &&
+		bytes.Equal(s.SharedKey, o.SharedKey) &&
+		s.Other.Equal(o.Other)
+}
+
 func (s *Session) Upgrade(resp *Response) error {
 	if s.Status != Pending {
 		return fmt.Errorf("session is not Pending")
@@ -143,7 +157,7 @@ func (s *Session) SendText(message string) error {
 		return err
 	}
 
-	s.ExtendExpiration()
+	s.ExtendExpiration() // TODO: perhaps don't want to extend when Text
 	return nil
 }
 

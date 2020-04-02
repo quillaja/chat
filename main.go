@@ -21,11 +21,6 @@ func main() {
 	contactsFile := flag.String("contacts", "", "contacts")
 	flag.Parse()
 
-	app, err := NewApplication(*meProfile, *contactsFile)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
 	// output stuff
 	output := Color(os.Stdout, Green)
 	null, _ := os.Open(os.DevNull)
@@ -41,8 +36,12 @@ func main() {
 	enableLog(true)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go app.Listener(ctx)
-	go app.MessageProcessor(ctx)
+
+	engine, err := NewChatEngine(*meProfile, *contactsFile)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	engine.Start(ctx)
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, os.Kill, syscall.SIGTERM)
@@ -71,10 +70,10 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, app.Me.Port)
+				fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, engine.Me.Port)
 
 			case ".me":
-				fmt.Fprintf(output, "I am \"%s\"\n", app.Me)
+				fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
 
 			case ".me-new":
 				if rest == "" {
@@ -92,24 +91,30 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				app.Me = p
+				engine.Me = p
 
 			case ".requests":
-				for i, r := range app.Requests {
-					fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
-						r.Profile,
-						r.Time().Format(time.Kitchen),
-						time.Since(r.Time()))
+				for i, r := range engine.Requests {
+					if r != nil {
+						fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
+							r.Profile,
+							r.Time().Format(time.Kitchen),
+							time.Since(r.Time()))
+					}
 				}
 
 			case ".sessions":
-				for i, s := range app.Sessions {
-					fmt.Fprintf(output, "%d\t%s\n", i, s)
+				for i, s := range engine.Sessions {
+					if s != nil {
+						fmt.Fprintf(output, "%d\t%s\n", i, s)
+					}
 				}
 
 			case ".contacts":
-				for i, c := range app.Contacts {
-					fmt.Fprintf(output, "%d\t%s\n", i, c)
+				for i, c := range engine.Contacts {
+					if c != nil {
+						fmt.Fprintf(output, "%d\t%s\n", i, c)
+					}
 				}
 
 			case ".add-contact":
@@ -121,11 +126,16 @@ func main() {
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
 				if err == nil {
-					if n < 0 || n >= len(app.Sessions) {
+					if sess, ok := engine.GetSession(n); ok {
+						p = sess.Other
+						if p == nil {
+							log.Printf("session %d had a nil Other", n)
+							continue
+						}
+					} else {
 						log.Printf("%d not found\n", n)
 						continue
 					}
-					p = app.Sessions[n].Other
 
 				} else {
 					p, err = ParseProfile(rest)
@@ -135,26 +145,24 @@ func main() {
 					}
 				}
 
-				// copy and alter copy
-				// to allow "revert" if write-to-disk fails
-				newContacts := make([]*Profile, len(app.Contacts))
-				copy(newContacts, app.Contacts)
-				if index := searchProfiles(app.Contacts, p); index >= 0 {
-					old := newContacts[index]
-					newContacts[index] = p
+				// overwrite contact if existing Equal() one found
+				// TODO: do i really want to overwrite? what about having 2
+				// contacts with different names but the same address?
+				// i guess the question boils down to the definition of Profile
+				if index := engine.FindContact(p); index >= 0 {
+					old := engine.Contacts[index]
+					engine.Contacts[index] = p
 					log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
 				} else {
-					newContacts = append(newContacts, p)
+					engine.AddContact(p)
 					log.Printf("added %s\n", p)
 				}
 
-				err = WriteContacts(newContacts, *contactsFile)
+				err = WriteContacts(engine.Contacts, *contactsFile)
 				if err != nil {
 					log.Println(err)
-					log.Println("no changes saved")
-					continue
+					log.Println("did not save changes to disk")
 				}
-				app.Contacts = newContacts
 
 			case ".del-contact":
 				if rest == "" {
@@ -167,25 +175,19 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.Contacts) {
+
+				removed := engine.Contacts[n]
+				if engine.RemoveContact(n) {
+					log.Printf("deleted %s\n", removed)
+
+					err = WriteContacts(engine.Contacts, *contactsFile)
+					if err != nil {
+						log.Println(err)
+						log.Println("did not save changes to disk")
+					}
+				} else {
 					log.Printf("%d not found\n", n)
-					continue
 				}
-
-				// copy and alter copy
-				// to allow "revert" if write-to-disk fails
-				newContacts := make([]*Profile, len(app.Contacts))
-				copy(newContacts, app.Contacts)
-				newContacts = append(newContacts[:n], newContacts[n+1:]...)
-				log.Printf("deleted %s\n", app.Contacts[n])
-
-				err = WriteContacts(newContacts, *contactsFile)
-				if err != nil {
-					log.Println(err)
-					log.Println("no changes saved")
-					continue
-				}
-				app.Contacts = newContacts
 
 			case ".ping": // .ping [contact number]
 				if rest == "" {
@@ -196,23 +198,23 @@ func main() {
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
 				if err == nil {
-					if n < 0 || n >= len(app.Contacts) {
+					if p, _ = engine.GetContact(n); p != nil {
 						log.Printf("%d not found\n", n)
 						continue
 					}
-					p = app.Contacts[n]
 				} else {
 					p, err = ParseProfile(rest)
 					if err != nil {
 						log.Println(err)
 						continue
 					}
-					if i := searchProfiles(app.Contacts, p); i >= 0 {
-						p = app.Contacts[i] // use profile from contacts if available
+					if i := engine.FindContact(p); i >= 0 {
+						p = engine.Contacts[i] // use profile from contacts if available
 					}
+
 				}
 
-				err = app.SendRequest(p)
+				err = engine.SendRequest(p)
 				if err != nil {
 					log.Println(err)
 					continue
@@ -230,13 +232,12 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.Sessions) {
-					log.Printf("%d not found\n", n)
-					continue
-				}
 
-				app.Sessions = append(app.Sessions[:n], app.Sessions[n+1:]...)
-				log.Println("dropped session")
+				if engine.RemoveSession(n) {
+					log.Println("dropped session")
+				} else {
+					log.Printf("%d not found\n", n)
+				}
 
 			case ".accept": // .accept [request number]
 				if rest == "" {
@@ -249,12 +250,12 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.Requests) {
+				if _, ok := engine.GetRequest(n); !ok {
 					log.Printf("%d not found\n", n)
 					continue
 				}
 
-				err = app.AcceptRequest(app.Requests[n])
+				err = engine.AcceptRequest(engine.Requests[n])
 				if err != nil {
 					log.Println(err)
 					continue
@@ -272,13 +273,12 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.Requests) {
-					log.Printf("%d not found\n", n)
-					continue
-				}
 
-				app.Requests = append(app.Requests[:n], app.Requests[n+1:]...)
-				log.Println("removed request")
+				if engine.RemoveRequest(n) {
+					log.Println("removed request")
+				} else {
+					log.Printf("%d not found\n", n)
+				}
 
 			case ".msg": // .msg [session number] [text]
 				if rest == "" {
@@ -291,7 +291,7 @@ func main() {
 					log.Println(err)
 					continue
 				}
-				if n < 0 || n >= len(app.Sessions) {
+				if _, ok := engine.GetSession(n); !ok {
 					log.Printf("%d not found\n", n)
 					continue
 				}
@@ -301,7 +301,7 @@ func main() {
 					continue
 				}
 
-				err = app.Sessions[n].SendText(parts[1])
+				err = engine.Sessions[n].SendText(parts[1])
 				if err != nil {
 					log.Println(err)
 					continue
@@ -369,17 +369,6 @@ func (w scw) Write(b []byte) (n int, err error) {
 	return w.writer.Write([]byte(w.color + string(b) + reset))
 }
 
-// returns first index where list contains a profile Equal() to p, or -1
-// if not found.
-func searchProfiles(list []*Profile, p *Profile) int {
-	for i := range list {
-		if p.Equal(list[i]) {
-			return i
-		}
-	}
-	return -1
-}
-
 func GetIP() (ip string, err error) {
 	// uses just amazon, but could use multiple/alt
 	resp, err := http.Get("http://checkip.amazonaws.com/")
@@ -390,81 +379,4 @@ func GetIP() (ip string, err error) {
 
 	_, err = fmt.Fscan(resp.Body, &ip)
 	return
-}
-
-type Application struct {
-	Me       *Profile
-	Contacts []*Profile
-	Sessions []*Session
-	Requests []*Request // requests needing approval
-	queue    chan *Message
-}
-
-func NewApplication(profilePath, contactsPath string) (*Application, error) {
-	me, err := ReadProfile(profilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	contacts, err := ReadContacts(contactsPath)
-	if err != nil {
-		log.Println(err)
-		contacts = make([]*Profile, 0)
-	}
-
-	return &Application{
-		Me:       me,
-		Contacts: contacts,
-		Sessions: make([]*Session, 0),
-		Requests: make([]*Request, 0),
-		queue:    make(chan *Message, 8),
-	}, nil
-}
-
-func (app *Application) AcceptRequest(request *Request) error {
-	// after accepting a request.
-	// 1. begin new (active) session
-	// 2. send response
-	// 3. add session to manager
-
-	sess, resp, err := BeginSession(app.Me, request)
-	if err != nil {
-		return err
-	}
-
-	err = sess.SendResponse(resp)
-	if err != nil {
-		return err
-	}
-
-	// remove request from waiting list
-	for i, r := range app.Requests {
-		if request == r {
-			// a = a[:i+copy(a[i:], a[i+1:])]
-			//app.requests = app.requests[:i+copy(app.requests[i:], app.requests[i+i:])] // remove request
-			// a = append(a[:i], a[i+1:]...)
-			app.Requests = append(app.Requests[:i], app.Requests[i+1:]...)
-			break
-		}
-	}
-
-	// TODO: ?? add/modify contact list with new/updated Profile?
-	app.Sessions = append(app.Sessions, sess)
-	log.Printf("began session with %s\n", sess.Other)
-	return nil
-}
-
-func (app *Application) SendRequest(to *Profile) error {
-	sess, req, err := InitiateSession(app.Me, to)
-	if err != nil {
-		return err
-	}
-
-	err = sess.SendRequest(req)
-	if err != nil {
-		return err
-	}
-
-	app.Sessions = append(app.Sessions, sess)
-	return nil
 }

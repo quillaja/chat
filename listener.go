@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// port without :
-func (app *Application) Listener(ctx context.Context) error {
+// Listener runs a loop to read
+func (eng *ChatEngine) Listener(ctx context.Context) error {
 	const maxBufferSize = 4096
 
-	listenAddress, err := net.ResolveUDPAddr("udp", ":"+app.Me.Port)
+	listenAddress, err := net.ResolveUDPAddr("udp", ":"+eng.Me.Port)
 	if err != nil {
 		return err
 	}
@@ -31,11 +31,11 @@ func (app *Application) Listener(ctx context.Context) error {
 			done = true // exit for loop
 
 		default:
-			buf := make([]byte, maxBufferSize)
+			b := make([]byte, maxBufferSize)
 			conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-			_, addr, errRead := conn.ReadFrom(buf) // blocking read
+			_, addr, errRead := conn.ReadFrom(b) // blocking read
 			if errRead == nil {
-				go processData(buf, addr.String(), app.queue)
+				go processData(b, addr.String(), eng.queue)
 			} else {
 				//log.Println(errRead) // expect io timeout error
 			}

@@ -45,19 +45,9 @@ type Text struct {
 	TimeStamp
 }
 
-func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
-	privateKey, err := GenerateRSAKeyPair()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	r := &Request{
-		Profile:   p,
-		TimeStamp: Now(),
-		PublicKey: privateKey.PublicKey,
-	}
-	return r, privateKey, nil
-}
+//
+// Profile stuff
+//
 
 func ReadProfile(filename string) (*Profile, error) {
 	data, err := ioutil.ReadFile(filename)
@@ -99,6 +89,7 @@ func WriteContacts(contacts []*Profile, filename string) error {
 
 func ParseProfile(raw string) (*Profile, error) {
 	p := &Profile{}
+
 	parts := strings.SplitN(raw, "@", 2)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("no name")
@@ -124,4 +115,28 @@ func (p *Profile) FullAddress() string { return p.Address + ":" + p.Port }
 
 func (p *Profile) String() string { return p.Name + "@" + p.FullAddress() }
 
-func (p *Profile) Equal(o *Profile) bool { return p.FullAddress() == o.FullAddress() }
+func (p *Profile) Equal(o *Profile) bool { return o != nil && p.FullAddress() == o.FullAddress() }
+
+//
+// Request stuff
+//
+
+func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
+	if p == nil {
+		return nil, nil, fmt.Errorf("nil Profile")
+	}
+
+	privateKey, err := GenerateRSAKeyPair()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	r := &Request{
+		Profile:   p,
+		TimeStamp: Now(),
+		PublicKey: privateKey.PublicKey,
+	}
+	return r, privateKey, nil
+}
+
+func (r *Request) Equal(o *Request) bool { return o != nil && *r == *o }
