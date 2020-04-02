@@ -198,7 +198,7 @@ func main() {
 				arg := strings.SplitN(rest, " ", 2)[0]
 				n, err := strconv.Atoi(arg)
 				if err == nil {
-					if p, _ = engine.GetContact(n); p != nil {
+					if p, _ = engine.GetContact(n); p == nil {
 						log.Printf("%d not found\n", n)
 						continue
 					}

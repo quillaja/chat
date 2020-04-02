@@ -24,7 +24,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 					continue
 				}
 
-				eng.Requests = append(eng.Requests, request)
+				eng.AddRequest(request)
 				log.Printf("got request from %s\n", request.Profile)
 
 			case PayloadResponse:
@@ -39,6 +39,9 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				// 2. "upgrade" session to Active. fill in SharedKey and OtherPubKey
 				var sess *Session
 				for _, s := range eng.Sessions {
+					if s == nil {
+						continue
+					}
 					err := s.Upgrade(resp) // upgrade will only work with correct key
 					if err == nil {
 						sess = s // found correct session

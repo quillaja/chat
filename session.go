@@ -111,6 +111,9 @@ func (s *Session) Equal(o *Session) bool {
 }
 
 func (s *Session) Upgrade(resp *Response) error {
+	if resp == nil {
+		return fmt.Errorf("nil Response")
+	}
 	if s.Status != Pending {
 		return fmt.Errorf("session is not Pending")
 	}
