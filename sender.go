@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"net"
+	"time"
 )
 
-// to is full address (ex 111.222.333.444:555)
+// Send a Message. `to` is full address (ex 111.222.333.444:555).
 func Send(to string, msg *Message) error {
 	conn, err := net.Dial("udp", to)
 	if err != nil {
@@ -24,6 +25,19 @@ func Send(to string, msg *Message) error {
 	_, err = conn.Write(buf.Bytes())
 	if err != nil {
 		return err
+	}
+
+	// TODO: experiment to detect when a Send fails due to
+	// there being no one on the other side.
+	// SHOULD timeout most of the time. Since send is on a random ephemeral
+	// port, I would not expect to ever accidently read data meant to be
+	// read by "Listener()".
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, err = conn.Read([]byte{0})
+	if neterr, ok := err.(net.Error); ok { // i only care about timeout error
+		if !neterr.Timeout() {
+			return err
+		}
 	}
 
 	return nil
