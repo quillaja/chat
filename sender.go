@@ -34,8 +34,8 @@ func Send(to string, msg *Message) error {
 	// read by "Listener()".
 	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	_, err = conn.Read([]byte{0})
-	if neterr, ok := err.(net.Error); ok { // i only care about timeout error
-		if !neterr.Timeout() {
+	if neterr, ok := err.(net.Error); ok {
+		if !neterr.Timeout() { // timeout error is expected
 			return err
 		}
 	}

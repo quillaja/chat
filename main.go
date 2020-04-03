@@ -332,6 +332,7 @@ func console(cmdQueue chan []string) {
 	}
 }
 
+// Color constants.
 const (
 	wrapper       = "\x1B[%sm"
 	reset         = "\x1B[0m"
@@ -353,6 +354,8 @@ const (
 	BrightWhite   = "97"
 )
 
+// Color wraps a writer so subsequent writes are surrounded with
+// ANSI escape codes to color console output.
 func Color(w io.Writer, color string) io.Writer {
 	return scw{
 		writer: w,
@@ -369,6 +372,7 @@ func (w scw) Write(b []byte) (n int, err error) {
 	return w.writer.Write([]byte(w.color + string(b) + reset))
 }
 
+// GetIP gets the client's external IP address using an external webservice.
 func GetIP() (ip string, err error) {
 	// uses just amazon, but could use multiple/alt
 	resp, err := http.Get("http://checkip.amazonaws.com/")

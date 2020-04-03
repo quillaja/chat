@@ -18,6 +18,8 @@ AES
 
 */
 
+// GenerateAES256Key makes a 32 byte key using a cryptographically acceptable
+// source of random data.
 func GenerateAES256Key() ([]byte, error) {
 	const size = 32 // 32 bytes for AES256
 	key := make([]byte, size)
@@ -25,7 +27,8 @@ func GenerateAES256Key() ([]byte, error) {
 	return key, err
 }
 
-// key length 16 bytes (AES128) or 32 bytes (AES256)
+// AESDecrypt ciphertext to plaintext using key.
+// Key length of 16 bytes (AES128) or 32 bytes (AES256)
 func AESDecrypt(ciphertext, key []byte) (plaintext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -51,6 +54,7 @@ func AESDecrypt(ciphertext, key []byte) (plaintext []byte, err error) {
 	return
 }
 
+// AESEncrypt plaintext to ciphertext using key.
 func AESEncrypt(plaintext, key []byte) (ciphertext []byte, err error) {
 	// plaintext should be a multiple of the block size.
 	// here plaintext is padded with 0, but
@@ -82,6 +86,7 @@ func AESEncrypt(plaintext, key []byte) (ciphertext []byte, err error) {
 	return
 }
 
+// SignHS256 creates a signature of message using the HMAC-SHA256 hash.
 func SignHS256(message, key []byte) (signature []byte) {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(message) // signature is a hash of payload
@@ -89,11 +94,13 @@ func SignHS256(message, key []byte) (signature []byte) {
 	return
 }
 
+// ValidSignatureHS256 validates that a signaure matches the expected signature.
 func ValidSignatureHS256(signature, message, key []byte) bool {
 	expectedMAC := SignHS256(message, key)
 	return hmac.Equal(signature, expectedMAC)
 }
 
+// SignHS512 creates a signature of message using the HMAC-SHA512 hash.
 func SignHS512(message, key []byte) (signature []byte) {
 	mac := hmac.New(sha512.New, key)
 	mac.Write(message) // signature is a hash of payload
@@ -101,6 +108,7 @@ func SignHS512(message, key []byte) (signature []byte) {
 	return
 }
 
+// ValidSignatureHS512 validates that a signaure matches the expected signature.
 func ValidSignatureHS512(signature, message, key []byte) bool {
 	expectedMAC := SignHS512(message, key)
 	return hmac.Equal(signature, expectedMAC)
@@ -112,27 +120,34 @@ RSA
 
 */
 
+// GenerateRSAKeyPair creates a public/private key pair using a 2048 bit RSA key.
 func GenerateRSAKeyPair() (*rsa.PrivateKey, error) {
-	const size = 2048 // 4096 bits for better security (vs 2048 and smaller)
+	// use 2048 bits here to keep rsa keys from being huge.
+	// 4096 bits for better security (vs 2048 and smaller)
+	const size = 2048
 	return rsa.GenerateKey(rand.Reader, size)
 }
 
+// RSAEncrypt plaintext to ciphertext using RSA-OAEP with a SHA-512 hash.
 func RSAEncrypt(plaintext []byte, receiverKey *rsa.PublicKey) (ciphertext []byte, err error) {
 	ciphertext, err = rsa.EncryptOAEP(sha512.New(), rand.Reader, receiverKey, plaintext, []byte{})
 	return
 }
 
+// RSADecrypt ciphertext to plaintext using RSA-OAEP with a SHA-512 hash.
 func RSADecrypt(ciphertext []byte, receiverKey *rsa.PrivateKey) (plaintext []byte, err error) {
 	plaintext, err = rsa.DecryptOAEP(sha512.New(), rand.Reader, receiverKey, ciphertext, []byte{})
 	return
 }
 
+// SignRSA512 signs message using key and SHA-512.
 func SignRSA512(message []byte, senderKey *rsa.PrivateKey) (signature []byte, err error) {
 	hashed := sha512.Sum512(message) // 64 bytes long
 	signature, err = rsa.SignPSS(rand.Reader, senderKey, crypto.SHA512, hashed[:], nil)
 	return
 }
 
+// ValidSignatureRSA512 validates that signature matches the expected signature.
 func ValidSignatureRSA512(signature, message []byte, senderKey *rsa.PublicKey) (valid bool) {
 	hashed := sha512.Sum512(message)
 	err := rsa.VerifyPSS(senderKey, crypto.SHA512, hashed[:], signature, nil)
@@ -143,12 +158,14 @@ func ValidSignatureRSA512(signature, message []byte, senderKey *rsa.PublicKey) (
 	return
 }
 
+// SignRSA256 signs message using key and SHA-256.
 func SignRSA256(message []byte, senderKey *rsa.PrivateKey) (signature []byte, err error) {
 	hashed := sha256.Sum256(message) // 64 bytes long
 	signature, err = rsa.SignPSS(rand.Reader, senderKey, crypto.SHA256, hashed[:], nil)
 	return
 }
 
+// ValidSignatureRSA256 validates that signature matches the expected signature.
 func ValidSignatureRSA256(signature, message []byte, senderKey *rsa.PublicKey) (valid bool) {
 	hashed := sha256.Sum256(message)
 	err := rsa.VerifyPSS(senderKey, crypto.SHA256, hashed[:], signature, nil)

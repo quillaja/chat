@@ -5,27 +5,33 @@ import (
 	"log"
 )
 
+// ChatEngine incorporates all the nitty gritty of dealing with other chat clients.
+// It also simplifys managment of various state by the User Interface and
+// provides a mechanism for incoming events to be communicated to the User Interface.
 type ChatEngine struct {
-	Me       *Profile
-	Contacts []*Profile
-	Sessions []*Session
-	Requests []*Request // requests needing approval
-	Events   chan EngineEvent
-	queue    chan *Message
+	Me       *Profile         // profile in use by this client
+	Contacts []*Profile       // a list of known profiles
+	Sessions []*Session       // chat sessions of all status
+	Requests []*Request       // requests needing approval
+	Events   chan EngineEvent // incoming events to signal the UI that something needs done
+	queue    chan *Message    // queue of messages between Listener() and MessageProcessor()
 }
 
+// EngineEvent communicates engine events to the User Interface.
 type EngineEvent struct {
 	Data  interface{} // pointer Request, Response, Profile, Session associated with event
 	Index int         // index of Data in an associated slice, if applicable
 	Type  EventType   // General event type. Specifics determined by Type and type of Data.
 }
 
+// EventType simple type of event.
 type EventType int
 
+// NewChatEngine initializes a new chat engine.
 func NewChatEngine(profilePath, contactsPath string) (*ChatEngine, error) {
 	me, err := ReadProfile(profilePath)
 	if err != nil {
-		// TODO: if no profile, use IP from GetIP() and a default port?
+		// TODO: if no profile, use IP from GetIP() and a default port (eg 5190 (old AIM port))?
 		return nil, err
 	}
 
@@ -45,11 +51,15 @@ func NewChatEngine(profilePath, contactsPath string) (*ChatEngine, error) {
 	}, nil
 }
 
+// Start kicks off sub processes of the engine.
 func (eng *ChatEngine) Start(ctx context.Context) {
 	go eng.Listener(ctx)
 	go eng.MessageProcessor(ctx)
 }
 
+// AcceptRequest performs the routine work in responding positively (accepting)
+// to a Request to chat. It manages Session state and sends an affirmative
+// Response to the other client.
 func (eng *ChatEngine) AcceptRequest(request *Request) error {
 	// after accepting a request.
 	// 1. begin new (active) session
@@ -75,6 +85,8 @@ func (eng *ChatEngine) AcceptRequest(request *Request) error {
 	return nil
 }
 
+// SendRequest performs the routine work in asking another client to chat.
+// This includes Session managmenent and sending a Request to ther other client.
 func (eng *ChatEngine) SendRequest(to *Profile) error {
 	sess, req, err := InitiateSession(eng.Me, to)
 	if err != nil {

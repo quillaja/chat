@@ -11,6 +11,12 @@ type Message struct {
 	Type      PayloadType
 }
 
+// NewMessage creates a new encrypted and signed Message using the provided
+// plaintext payload and shared key.
+//
+// Encryption is done using AES256 in cipher block chaining (CBC) mode, and
+// signing is done using HMAC-SHA256. Shared key should be 32 bytes to do
+// AES256. Use GenerateAES256Key() to do so.
 func NewMessage(plType PayloadType, plaintext []byte, sharedKey []byte) (m *Message, err error) {
 	// encrypt message with AEP
 	ciphertext, err := AESEncrypt(plaintext, sharedKey)
@@ -29,23 +35,27 @@ func NewMessage(plType PayloadType, plaintext []byte, sharedKey []byte) (m *Mess
 	return
 }
 
+// Verify the Signature on a message.
 func (m *Message) Verify(sharedKey []byte) (valid bool) {
 	return ValidSignatureHS256(m.Signature, m.Payload, sharedKey)
 }
 
+// Decrypt a message payload into plaintext bytes.
 func (m *Message) Decrypt(sharedKey []byte) (plaintext []byte, err error) {
 	return AESDecrypt(m.Payload, sharedKey)
 }
 
+// PayloadType indicates the type encrypted in a Message.
 type PayloadType byte
 
+// Values of PayloadType
 const (
 	PayloadText PayloadType = iota
 	PayloadRequest
 	PayloadResponse
 )
 
-// attempts to decrypt and decode the Message into a Request.
+// GetRequest attempts to decrypt and decode the Message into a Request.
 func (m *Message) GetRequest() (req *Request, err error) {
 	if !m.Verify(ZeroKey) {
 		err = fmt.Errorf("invalid signature")
@@ -66,7 +76,7 @@ func (m *Message) GetRequest() (req *Request, err error) {
 	return
 }
 
-// attempts to decrypt and decode the Message into a Response.
+// GetResponse attempts to decrypt and decode the Message into a Response.
 // SharedKey remains encrypted.
 func (m *Message) GetResponse() (resp *Response, err error) {
 	if !m.Verify(ZeroKey) {
@@ -88,7 +98,7 @@ func (m *Message) GetResponse() (resp *Response, err error) {
 	return
 }
 
-// attempts to decrypt and decode the Message into a Text (using shared key).
+// GetText attempts to decrypt and decode the Message into a Text (using shared key).
 func (m *Message) GetText(sharedKey []byte) (t *Text, err error) {
 	if !m.Verify(sharedKey) {
 		err = fmt.Errorf("invalid signature")
@@ -109,7 +119,8 @@ func (m *Message) GetText(sharedKey []byte) (t *Text, err error) {
 	return
 }
 
-// make it easier to make a Message from Request
+// PackageRequest makes it easier to make a Message from Request.
+// Uses the ZeroKey for pseudo-encryption of the message.
 func PackageRequest(req *Request) (m *Message, err error) {
 	data, err := gobEncode(req)
 	if err != nil {
@@ -124,7 +135,8 @@ func PackageRequest(req *Request) (m *Message, err error) {
 	return
 }
 
-// make it easier to make a Message from Response
+// PackageResponse makes it easier to make a Message from Response.
+// Uses the ZeroKey for pseudo-encryption of the message.
 func PackageResponse(resp *Response) (m *Message, err error) {
 	data, err := gobEncode(resp)
 	if err != nil {
@@ -139,7 +151,8 @@ func PackageResponse(resp *Response) (m *Message, err error) {
 	return
 }
 
-// make it easier to make a Message from Text
+// PackageText makes it easier to make a Message from Text.
+// Requires a shared key for encrypting the Message.Payload.
 func PackageText(t *Text, sharedKey []byte) (m *Message, err error) {
 	data, err := gobEncode(t)
 	if err != nil {

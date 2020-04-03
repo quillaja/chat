@@ -9,7 +9,9 @@ import (
 	"time"
 )
 
-// Listener runs a loop to read
+// Listener runs a loop to read data from a specific port using the UDP
+// protocol. Each successful read spawns a goroutine to decode the data
+// into a Message and forward that to MessageProcessor().
 func (eng *ChatEngine) Listener(ctx context.Context) error {
 	const maxBufferSize = 4096
 
@@ -37,7 +39,10 @@ func (eng *ChatEngine) Listener(ctx context.Context) error {
 			if errRead == nil {
 				go processData(b, addr.String(), eng.queue)
 			} else {
-				//log.Println(errRead) // expect io timeout error
+				// expect io timeout error on read
+				if neterr, ok := errRead.(net.Error); ok && !neterr.Timeout() {
+					log.Println(neterr)
+				}
 			}
 		}
 	}
@@ -46,7 +51,7 @@ func (eng *ChatEngine) Listener(ctx context.Context) error {
 	return err
 }
 
-// transform []byte to Message
+// processData transforms []byte to Message and enqueues it for processing.
 func processData(b []byte, addr string, msgQueue chan *Message) {
 	var m Message
 

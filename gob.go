@@ -5,15 +5,10 @@ import (
 	"encoding/gob"
 )
 
-/*
-orig := gobEncode(x)
-switch v := gobDecode(orig).(type) {
-case int:
-case string:
-case T:
-default:
-}
-*/
+//
+// These 2 functions provide an slightly less tedious way to encode/decode
+// the 3 primary datatypes used by the ChatEngine.
+//
 
 func gobDecode(b []byte, plType PayloadType) interface{} {
 

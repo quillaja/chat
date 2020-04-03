@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// MessageProcessor runs a loop consuming, decoding, and processing
+// Messages received from Listener().
 func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 	var done bool
 	for !done {
@@ -35,7 +37,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				}
 
 				// when get response:
-				// 1. find Pending session whose PrivKey can decrypt the shared key. (check sig using other pub key)
+				// 1. find Pending session whose PrivKey can decrypt the shared key.
 				// 2. "upgrade" session to Active. fill in SharedKey and OtherPubKey
 				var sess *Session
 				for _, s := range eng.Sessions {
