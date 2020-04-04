@@ -330,8 +330,8 @@ func main() {
 					} // clamp
 					show := s.Msgs[start:]
 					for i, t := range show {
-						fmt.Printf("%d %s | %s > %s\n", i,
-							t.From(),
+						fmt.Fprintf(output, "%d %s\t| %s > %s\n", i,
+							t.From().Name,
 							t.TimeStamp.Time().Format(time.Kitchen),
 							t.Message)
 					}
