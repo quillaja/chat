@@ -60,6 +60,7 @@ type Response struct {
 type Text struct {
 	Message string // ideal max len 1024 bytes
 	TimeStamp
+	author *Profile // not encoded for transmission
 }
 
 //
@@ -169,3 +170,10 @@ func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
 
 // Equal compares one request to another.
 func (r *Request) Equal(o *Request) bool { return o != nil && *r == *o }
+
+//
+// Text
+//
+
+// From gets the profile of the Text writer.
+func (t *Text) From() *Profile { return t.author }

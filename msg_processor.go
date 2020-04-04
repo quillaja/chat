@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"time"
 )
 
 // MessageProcessor runs a loop consuming, decoding, and processing
@@ -27,6 +25,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				}
 
 				eng.AddRequest(request)
+				// TODO: event to UI
 				log.Printf("got request from %s\n", request.Profile)
 
 			case PayloadResponse:
@@ -53,6 +52,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				}
 
 				if sess != nil {
+					// TODO: event to UI
 					log.Printf("began session with %s\n", sess.Other)
 				} else {
 					log.Printf("no session found for Response from %s\n", resp.Request.Profile)
@@ -81,13 +81,9 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				}
 
 				if sess != nil {
-					sess.ExtendExpiration()
-					// TODO: change to use future 'ui' interface
-					fmt.Printf("(%d) %s | %s >\n\t%s\n",
-						sessNumber,
-						sess.Other,
-						text.Time().Format(time.Kitchen),
-						text.Message)
+					sess.PushIn(text)
+					// TODO: event to UI
+					log.Printf("new message for session %d\n", sessNumber)
 				} else {
 					log.Println("got non-sessioned message")
 				}

@@ -15,9 +15,11 @@ type Session struct {
 	Status      SessionStatus
 	PrivKey     *rsa.PrivateKey
 	SharedKey   []byte
+	Me          *Profile
 	Other       *Profile
 	OtherPubKey *rsa.PublicKey
 	Expires     time.Time
+	Msgs        []*Text
 }
 
 // SessionIdleTimeout is the length of time a Session can go without
@@ -45,8 +47,10 @@ func InitiateSession(me, other *Profile) (*Session, *Request, error) {
 	s := &Session{
 		Status:  Pending,
 		PrivKey: privKey,
+		Me:      me,
 		Other:   other,
 		Expires: time.Now().Add(SessionIdleTimeout),
+		Msgs:    make([]*Text, 0),
 		// will not know SharedKey or OtherPubKey until received Response
 	}
 
@@ -91,9 +95,11 @@ func BeginSession(me *Profile, req *Request) (*Session, *Response, error) {
 		Status:      Active,
 		PrivKey:     privKey,
 		SharedKey:   k,
+		Me:          me,
 		Other:       req.Profile,
 		OtherPubKey: req.PublicKey,
 		Expires:     time.Now().Add(SessionIdleTimeout),
+		Msgs:        make([]*Text, 0),
 	}
 
 	return s, resp, err
@@ -181,8 +187,7 @@ func (s *Session) SendText(message string) error {
 		return err
 	}
 
-	// TODO: perhaps don't want to extend when sending Text, only receiving?
-	s.ExtendExpiration()
+	s.PushOut(text)
 	return nil
 }
 
@@ -209,4 +214,16 @@ func (s *Session) SendResponse(resp *Response) error {
 	}
 
 	return Send(s.Other.FullAddress(), m)
+}
+
+func (s *Session) PushIn(t *Text) {
+	t.author = s.Other
+	s.Msgs = append(s.Msgs, t)
+	s.ExtendExpiration()
+}
+
+func (s *Session) PushOut(t *Text) {
+	t.author = s.Me
+	s.Msgs = append(s.Msgs, t)
+	s.ExtendExpiration() // TODO: perhaps don't want to extend when sending Text, only receiving?
 }

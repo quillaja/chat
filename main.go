@@ -308,6 +308,34 @@ func main() {
 				}
 				log.Println("sent")
 
+			case ".show": // .show [session number]
+				if rest == "" {
+					log.Println(".show [session number]")
+					continue
+				}
+				parts = strings.SplitN(rest, " ", 2)
+				n, err := strconv.Atoi(parts[0])
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if s, ok := engine.GetSession(n); !ok {
+					log.Printf("%d not found\n", n)
+					continue
+				} else {
+					const num = 5
+					start := len(s.Msgs) - num
+					if start < 0 {
+						start = 0
+					} // clamp
+					show := s.Msgs[start:]
+					for i, t := range show {
+						fmt.Printf("%d %s | %s > %s\n", i,
+							t.From(),
+							t.TimeStamp.Time().Format(time.Kitchen),
+							t.Message)
+					}
+				}
 			}
 		}
 	}
