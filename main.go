@@ -21,6 +21,16 @@ func main() {
 	contactsFile := flag.String("contacts", "", "contacts")
 	flag.Parse()
 
+	me, err := ReadProfile(*meProfile)
+	if err != nil {
+		log.Println(err)
+	}
+
+	contacts, err := ReadContacts(*contactsFile)
+	if err != nil {
+		log.Println(err)
+	}
+
 	// output stuff
 	output := Color(os.Stdout, Green)
 	null, _ := os.Open(os.DevNull)
@@ -37,7 +47,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	engine, err := NewChatEngine(*meProfile, *contactsFile)
+	engine, err := NewChatEngine(me, contacts)
 	if err != nil {
 		log.Fatalln(err)
 	}

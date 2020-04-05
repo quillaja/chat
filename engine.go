@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 )
 
@@ -19,28 +20,40 @@ type ChatEngine struct {
 
 // EngineEvent communicates engine events to the User Interface.
 type EngineEvent struct {
-	Data  interface{} // pointer Request, Response, Profile, Session associated with event
-	Index int         // index of Data in an associated slice, if applicable
-	Type  EventType   // General event type. Specifics determined by Type and type of Data.
+	Data    interface{} // pointer Request, Response, Profile, Session associated with event
+	Index   int         // index of Data in an associated slice, if applicable
+	Type    EventType   // General event type. Specifics determined by Type and type of Data.
+	Message string      // text with details?
 }
 
 // EventType simple type of event.
 type EventType int
 
-// NewChatEngine initializes a new chat engine.
-func NewChatEngine(profilePath, contactsPath string) (*ChatEngine, error) {
-	me, err := ReadProfile(profilePath)
-	if err != nil {
-		// TODO: if no profile, use IP from GetIP() and a default port (eg 5190 (old AIM port))?
-		return nil, err
-	}
+// EventTypes
+const (
+	Error EventType = iota
+	Add
+	Remove
+	Change
+)
 
-	contacts, err := ReadContacts(contactsPath)
-	if err != nil {
-		log.Println(err)
+// NewChatEngine initializes a new chat engine.
+func NewChatEngine(me *Profile, contacts []*Profile) (*ChatEngine, error) {
+	const defaultListeningPort = "5190" // old AIM port
+	if me == nil {
+		ip, err := GetIP()
+		if err != nil {
+			return nil, fmt.Errorf("no address given and unable to connect to IP service")
+		}
+		me = &Profile{
+			Name:    "unknown",
+			Address: ip,
+			Port:    defaultListeningPort,
+		}
+	}
+	if contacts == nil {
 		contacts = make([]*Profile, 0)
 	}
-
 	return &ChatEngine{
 		Me:       me,
 		Contacts: contacts,
