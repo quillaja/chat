@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -70,6 +71,12 @@ func main() {
 			front, rest := parts[0], parts[1] // rest should contain at least empty string
 
 			switch front {
+			case ".help":
+				// for _, c := range cmds {
+				// 	fmt.Println(c.usage(0) + "\n")
+				// }
+				fmt.Println(cmds.help())
+
 			case ".exit":
 				done = true
 				cancel()
@@ -358,15 +365,22 @@ func console(cmdQueue chan []string) {
 	scan := bufio.NewScanner(os.Stdin)
 	for scan.Scan() {
 		line := scan.Text()
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) < 1 { // empty string
-			continue
+		front, back := split(line)
+		cmdQueue <- []string{front, back}
+
+		// log.Printf("%q, %q\n", front, back)
+		p := cmds.parse(line)
+		// if p.err == nil {
+		// log.Println(c)
+		// p := c.complete(back)
+		// log.Printf("%+v err: %s\n", p, p.err)
+		for sub := &p; sub != nil; sub = sub.sub {
+			log.Printf("%+v err: %v\n", sub, sub.err)
+			// if sub.err != nil {
+			// 	fmt.Println(c.usage(0))
+			// }
 		}
-		if len(parts) == 1 {
-			parts = append(parts, "") //ensure 'rest' always has something
-		}
-		// log.Printf("%q\n", parts)
-		cmdQueue <- parts
+		// }
 	}
 }
 
@@ -421,4 +435,191 @@ func GetIP() (ip string, err error) {
 
 	_, err = fmt.Fscan(resp.Body, &ip)
 	return
+}
+
+const (
+	profile = `(.+@.+:\d+)`
+	integer = `(\d+)`
+	rest    = `(.*)`
+	spaces  = `\s+`
+)
+
+type command struct {
+	cmd        string   // cmd such as "contacts" or "msg"
+	args       []argdef // list of re to try in order to parse parameters
+	subcmds    commanddefs
+	defaultSub string // name of default subcommand
+	helptext   string
+}
+
+type argdef struct {
+	name string
+	re   *regexp.Regexp // probably have to change this back to string. 'weirdness' without ^ and $
+}
+
+type parsedcmd struct {
+	cmd  string
+	args []string
+	sub  *parsedcmd
+	err  error
+}
+
+type commanddefs map[string]command
+
+func (cmds commanddefs) parse(line string) parsedcmd {
+	front, back := split(line)
+	c, ok := cmds[front]
+	if ok {
+		return c.complete(back)
+	}
+	return parsedcmd{
+		cmd:  front,
+		args: []string{back},
+		err:  fmt.Errorf("not a command"),
+	}
+}
+
+func (cmds commanddefs) help() string {
+	var output string
+	for _, c := range cmds {
+		output += c.usage(0) + "\n"
+	}
+	return output
+}
+
+func re(exps ...string) *regexp.Regexp {
+	exp := strings.Join(exps, spaces)
+	return regexp.MustCompile("^" + exp + "$")
+}
+
+func split(line string) (front, back string) {
+	line = strings.TrimSpace(line)
+	parts := strings.SplitN(line, " ", 2) // parts will always be at least len 1
+	if len(parts) <= 1 {
+		parts = append(parts, "") // ensure parts is len 2
+	}
+	return parts[0], strings.TrimSpace(parts[1])
+}
+
+// assumes "rest" is trimmed of space
+func (c command) complete(rest string) (p parsedcmd) {
+	p.cmd = c.cmd
+	log.Println(c.cmd, "|", rest)
+
+	if len(c.subcmds) > 0 {
+
+		// front, back := split(rest)
+		// sub, ok := c.subcmds[front]
+		// if !ok {
+		// 	sub, ok = c.subcmds[c.defaultSub]
+		// 	if !ok {
+		// 		p.err = fmt.Errorf("expected subcommand") // no default subcommand
+		// 		return
+		// 	}
+		// 	back = rest // put stripped arg back
+		// }
+		// s := sub.complete(back)
+		// p.sub = &s
+		s := c.subcmds.parse(rest)
+		if _, ok := c.subcmds[s.cmd]; s.err != nil && !ok { // equal to testing error for 'not a command'
+			s = c.subcmds.parse(c.defaultSub + " " + rest)
+			// if s.err != nil {
+			// 	p.err = s.err
+			// 	return
+			// }
+		}
+		p.sub = &s
+		p.err = s.err
+
+	} else {
+
+		log.Println("processing args:", rest)
+		for _, def := range c.args {
+			// re := regexp.MustCompile("^" + def + "$")
+			// re := regexp.MustCompile(def)
+			// matches := re(defs...).FindStringSubmatch(rest)
+			matches := def.re.FindStringSubmatch(rest)
+			if len(matches) > 0 {
+				p.args = matches[1:]
+				break
+			}
+		}
+		if len(c.args) > 0 && len(p.args) == 0 {
+			if rest == "" {
+				p.err = fmt.Errorf("expected arguments") // couldn't match any arg regexps
+			} else {
+				p.args = []string{rest}
+				p.err = fmt.Errorf("incorrect arguments")
+			}
+		}
+
+	}
+
+	return
+}
+
+func (c command) usage(lvl int) string {
+	const (
+		tab = "\t"
+		nl  = "\n"
+	)
+	prefix := strings.Repeat(tab, lvl)
+
+	var args []string
+	for _, def := range c.args {
+		args = append(args, def.name)
+	}
+	argstring := strings.Join(args, "|")
+
+	output := prefix + c.cmd + tab + argstring + nl
+	output += prefix + tab + c.helptext
+	if len(c.subcmds) > 0 {
+		output += nl + nl + prefix + tab + "subcommands:"
+		if c.defaultSub != "" {
+			output += " (defaults to " + c.defaultSub + ")"
+		}
+	}
+	for _, sub := range c.subcmds {
+		output += nl + prefix + sub.usage(lvl+1) + nl
+	}
+	return output
+}
+
+var cmds = commanddefs{
+	"msg": {
+		cmd:      "msg",
+		helptext: "sends a message",
+		args: []argdef{
+			{"SESSION_NUMBER MESSAGE", re(integer, rest)},
+		},
+	},
+
+	"contacts": {
+		cmd:        "contacts",
+		helptext:   "manage contacts",
+		defaultSub: "show",
+		subcmds: commanddefs{
+			"show": {
+				cmd:        "show",
+				helptext:   "list all contacts",
+				defaultSub: "all",
+				subcmds: commanddefs{
+					"all": {
+						cmd:      "all",
+						helptext: "does it all",
+						args: []argdef{
+							{"CONTACT_NUMBER", re(integer)},
+						},
+					},
+				},
+			},
+			"add": {
+				cmd:      "add",
+				helptext: "add a new contact",
+				args: []argdef{
+					{"PROFILE", re(profile)},
+					{"SESSION_NUMBER", re(integer)}},
+			},
+		},
+	},
 }
