@@ -370,17 +370,16 @@ func console(cmdQueue chan []string) {
 
 		// log.Printf("%q, %q\n", front, back)
 		p := cmds.parse(line)
-		// if p.err == nil {
-		// log.Println(c)
-		// p := c.complete(back)
-		// log.Printf("%+v err: %s\n", p, p.err)
-		for sub := &p; sub != nil; sub = sub.sub {
-			log.Printf("%+v err: %v\n", sub, sub.err)
-			// if sub.err != nil {
-			// 	fmt.Println(c.usage(0))
+		if p.err != nil {
+			fmt.Printf("Error:\t%s\nUsage:\n%s\n", p.err, p.leaf().usage(1))
+		} else {
+			p.leaf().run()
+			// for sub := &p; sub != nil; sub = sub.sub {
+			// 	log.Printf("%+v err: %v\n", sub, sub.err)
+			// 	// sub.run()
+			// 	sub.leaf().run()
 			// }
 		}
-		// }
 	}
 }
 
@@ -445,11 +444,12 @@ const (
 )
 
 type command struct {
-	cmd        string   // cmd such as "contacts" or "msg"
-	args       []argdef // list of re to try in order to parse parameters
-	subcmds    commanddefs
-	defaultSub string // name of default subcommand
-	helptext   string
+	cmd        string           // cmd such as "contacts" or "msg"
+	helptext   string           // description of command
+	args       []argdef         // list of re to try (in order) to parse parameters
+	defaultSub string           // name of default subcommand
+	subcmds    commanddefs      // subcommand definitions
+	fn         func(*parsedcmd) // action function
 }
 
 type argdef struct {
@@ -458,10 +458,12 @@ type argdef struct {
 }
 
 type parsedcmd struct {
-	cmd  string
-	args []string
-	sub  *parsedcmd
-	err  error
+	cmd     string
+	args    []string
+	sub     *parsedcmd
+	fn      func(*parsedcmd) // access through 'run()'
+	usagefn func(int) string // access through 'useage()'
+	err     error
 }
 
 type commanddefs map[string]command
@@ -504,39 +506,21 @@ func split(line string) (front, back string) {
 // assumes "rest" is trimmed of space
 func (c command) complete(rest string) (p parsedcmd) {
 	p.cmd = c.cmd
-	log.Println(c.cmd, "|", rest)
+	p.fn = c.fn
+	p.usagefn = c.usage
 
 	if len(c.subcmds) > 0 {
 
-		// front, back := split(rest)
-		// sub, ok := c.subcmds[front]
-		// if !ok {
-		// 	sub, ok = c.subcmds[c.defaultSub]
-		// 	if !ok {
-		// 		p.err = fmt.Errorf("expected subcommand") // no default subcommand
-		// 		return
-		// 	}
-		// 	back = rest // put stripped arg back
-		// }
-		// s := sub.complete(back)
-		// p.sub = &s
 		s := c.subcmds.parse(rest)
 		if _, ok := c.subcmds[s.cmd]; s.err != nil && !ok { // equal to testing error for 'not a command'
 			s = c.subcmds.parse(c.defaultSub + " " + rest)
-			// if s.err != nil {
-			// 	p.err = s.err
-			// 	return
-			// }
 		}
 		p.sub = &s
-		p.err = s.err
+		p.err = s.err // 'bubble up' error
 
 	} else {
 
-		log.Println("processing args:", rest)
 		for _, def := range c.args {
-			// re := regexp.MustCompile("^" + def + "$")
-			// re := regexp.MustCompile(def)
 			// matches := re(defs...).FindStringSubmatch(rest)
 			matches := def.re.FindStringSubmatch(rest)
 			if len(matches) > 0 {
@@ -546,7 +530,7 @@ func (c command) complete(rest string) (p parsedcmd) {
 		}
 		if len(c.args) > 0 && len(p.args) == 0 {
 			if rest == "" {
-				p.err = fmt.Errorf("expected arguments") // couldn't match any arg regexps
+				p.err = fmt.Errorf("expected arguments")
 			} else {
 				p.args = []string{rest}
 				p.err = fmt.Errorf("incorrect arguments")
@@ -580,9 +564,29 @@ func (c command) usage(lvl int) string {
 		}
 	}
 	for _, sub := range c.subcmds {
-		output += nl + prefix + sub.usage(lvl+1) + nl
+		output += nl + sub.usage(lvl+1) + nl
 	}
 	return output
+}
+
+func (p parsedcmd) run() { // TODO: return error from run() and fn()?
+	if p.fn != nil {
+		p.fn(&p)
+	}
+}
+
+func (p parsedcmd) leaf() *parsedcmd {
+	if p.sub == nil {
+		return &p
+	}
+	return p.sub.leaf()
+}
+
+func (p parsedcmd) usage(lvl int) string {
+	if p.usagefn == nil {
+		return ""
+	}
+	return p.usagefn(lvl)
 }
 
 var cmds = commanddefs{
@@ -592,6 +596,7 @@ var cmds = commanddefs{
 		args: []argdef{
 			{"SESSION_NUMBER MESSAGE", re(integer, rest)},
 		},
+		fn: func(p *parsedcmd) { fmt.Printf("hello from msg. args: %q\n", p.args) },
 	},
 
 	"contacts": {
@@ -603,6 +608,7 @@ var cmds = commanddefs{
 				cmd:        "show",
 				helptext:   "list all contacts",
 				defaultSub: "all",
+				fn:         func(p *parsedcmd) { fmt.Printf("hello from show. args: %q\n", p.args) },
 				subcmds: commanddefs{
 					"all": {
 						cmd:      "all",
@@ -610,6 +616,7 @@ var cmds = commanddefs{
 						args: []argdef{
 							{"CONTACT_NUMBER", re(integer)},
 						},
+						fn: func(p *parsedcmd) { fmt.Printf("hello from all. args: %q\n", p.args) },
 					},
 				},
 			},
@@ -619,7 +626,12 @@ var cmds = commanddefs{
 				args: []argdef{
 					{"PROFILE", re(profile)},
 					{"SESSION_NUMBER", re(integer)}},
+				fn: func(p *parsedcmd) { fmt.Printf("hello from add. args: %q\n", p.args) },
 			},
 		},
+	},
+
+	"nothing": {
+		cmd: "nothing",
 	},
 }
