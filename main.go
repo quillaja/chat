@@ -590,48 +590,134 @@ func (p parsedcmd) usage(lvl int) string {
 }
 
 var cmds = commanddefs{
+	"help": {
+		cmd:      "help",
+		helptext: "show information about commands",
+	},
+
+	"exit": {
+		cmd:      "exit",
+		helptext: "exit the chat client",
+	},
+
+	"ip": {
+		cmd:      "ip",
+		helptext: "display your current external IP and port chat client is using",
+	},
+
+	"me": {
+		cmd:        "me",
+		helptext:   "view and change user profile",
+		defaultSub: "show",
+		subcmds: commanddefs{
+			"show": {
+				cmd:      "show",
+				helptext: "display user information",
+			},
+			"edit": {
+				cmd:      "edit",
+				helptext: "modify user information",
+				args: []argdef{
+					{"PROFILE", re(profile)},
+				},
+			},
+		},
+	},
+
+	"contacts": {
+		cmd:        "contacts",
+		helptext:   "manage contacts",
+		defaultSub: "list",
+		subcmds: commanddefs{
+			"list": {
+				cmd:        "list",
+				helptext:   "list all contacts",
+				defaultSub: "all",
+			},
+			"add": {
+				cmd:      "add",
+				helptext: "add a new contact from an existing session or profile",
+				args: []argdef{
+					{"PROFILE", re(profile)},
+					{"SESSION_NUMBER", re(integer)},
+				},
+			},
+			"delete": {
+				cmd:      "delete",
+				helptext: "delete a contacts",
+				args: []argdef{
+					{"CONTACT_NUMBER", re(integer)},
+				},
+			},
+		},
+	},
+
+	"requests": {
+		cmd:        "requests",
+		helptext:   "manage requests for chat",
+		defaultSub: "list",
+		subcmds: commanddefs{
+			"list": {
+				cmd:      "list",
+				helptext: "display waiting requests",
+			},
+			"reject": {
+				cmd:      "reject",
+				helptext: "refuse a chat request",
+				args: []argdef{
+					{"REQUEST_NUMBER", re(integer)},
+				},
+			},
+			"accept": {
+				cmd:      "accept",
+				helptext: "accept chat request and begin a session",
+				args: []argdef{
+					{"REQUEST_NUMBER", re(integer)},
+				},
+			},
+		},
+	},
+
+	"sessions": {
+		cmd:        "sessions",
+		helptext:   "manage chat sessions",
+		defaultSub: "list",
+		subcmds: commanddefs{
+			"list": {
+				cmd:      "list",
+				helptext: "display all pending and active sessions",
+			},
+			"drop": {
+				cmd:      "drop",
+				helptext: "end a session",
+				args: []argdef{
+					{"SESSION_NUMBER", re(integer)},
+				},
+			},
+			"start": {
+				cmd:      "start",
+				helptext: "ping another user to a session",
+				args: []argdef{
+					{"CONTACT_NUMBER", re(integer)},
+					{"PROFILE", re(profile)},
+				},
+			},
+		},
+	},
+
 	"msg": {
 		cmd:      "msg",
 		helptext: "sends a message",
 		args: []argdef{
 			{"SESSION_NUMBER MESSAGE", re(integer, rest)},
 		},
-		fn: func(p *parsedcmd) { fmt.Printf("hello from msg. args: %q\n", p.args) },
 	},
 
-	"contacts": {
-		cmd:        "contacts",
-		helptext:   "manage contacts",
-		defaultSub: "show",
-		subcmds: commanddefs{
-			"show": {
-				cmd:        "show",
-				helptext:   "list all contacts",
-				defaultSub: "all",
-				fn:         func(p *parsedcmd) { fmt.Printf("hello from show. args: %q\n", p.args) },
-				subcmds: commanddefs{
-					"all": {
-						cmd:      "all",
-						helptext: "does it all",
-						args: []argdef{
-							{"CONTACT_NUMBER", re(integer)},
-						},
-						fn: func(p *parsedcmd) { fmt.Printf("hello from all. args: %q\n", p.args) },
-					},
-				},
-			},
-			"add": {
-				cmd:      "add",
-				helptext: "add a new contact",
-				args: []argdef{
-					{"PROFILE", re(profile)},
-					{"SESSION_NUMBER", re(integer)}},
-				fn: func(p *parsedcmd) { fmt.Printf("hello from add. args: %q\n", p.args) },
-			},
+	"show": {
+		cmd:      "show",
+		helptext: "show last few messages for a particular session",
+		args: []argdef{
+			{"SESSION_NUMBER", re(integer)},
 		},
-	},
-
-	"nothing": {
-		cmd: "nothing",
 	},
 }
