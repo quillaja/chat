@@ -216,12 +216,14 @@ func (s *Session) SendResponse(resp *Response) error {
 	return Send(s.Other.FullAddress(), m)
 }
 
+// PushIn appends an incomming Text from "other" client to the session's message list.
 func (s *Session) PushIn(t *Text) {
 	t.author = s.Other
 	s.Msgs = append(s.Msgs, t)
 	s.ExtendExpiration()
 }
 
+// PushOut appends an outbound Text from "me" client to the session's message list.
 func (s *Session) PushOut(t *Text) {
 	t.author = s.Me
 	s.Msgs = append(s.Msgs, t)

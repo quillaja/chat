@@ -58,8 +58,9 @@ func main() {
 	signal.Notify(sig, os.Interrupt, os.Kill, syscall.SIGTERM)
 
 	// process input
-	cmd := make(chan []string)
-	go console(cmd)
+	cmds := makeCommands()
+	cmdQueue := make(chan parsedcmd)
+	go console(cmds, cmdQueue)
 
 	for done := false; !done; {
 		select {
@@ -67,21 +68,22 @@ func main() {
 			done = true
 			cancel()
 
-		case parts := <-cmd:
-			front, rest := parts[0], parts[1] // rest should contain at least empty string
+		case cmd := <-cmdQueue:
 
-			switch front {
-			case ".help":
-				// for _, c := range cmds {
-				// 	fmt.Println(c.usage(0) + "\n")
-				// }
-				fmt.Println(cmds.help())
+			if cmd.err != nil {
+				log.Printf("Error: %s\n", cmd.err)
+				continue
+			}
 
-			case ".exit":
+			switch cmd.cmd {
+			case "help":
+				fmt.Fprintln(output, cmds.help()) // uses commanddefs
+
+			case "exit":
 				done = true
 				cancel()
 
-			case ".ip":
+			case "ip":
 				ip, err := GetIP()
 				if err != nil {
 					log.Println(err)
@@ -89,221 +91,201 @@ func main() {
 				}
 				fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, engine.Me.Port)
 
-			case ".me":
-				fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
+			case "me":
+				switch cmd = *cmd.leaf(); cmd.cmd {
+				case "show":
+					fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
 
-			case ".me-new":
-				if rest == "" {
-					log.Println(".me-new [<name>@<address>:<port>]")
-					continue
-				}
-				p, err := ParseProfile(rest)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-
-				err = WriteProfile(p, *meProfile)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				engine.Me = p
-
-			case ".requests":
-				for i, r := range engine.Requests {
-					if r != nil {
-						fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
-							r.Profile,
-							r.Time().Format(time.Kitchen),
-							time.Since(r.Time()))
-					}
-				}
-
-			case ".sessions":
-				for i, s := range engine.Sessions {
-					if s != nil {
-						fmt.Fprintf(output, "%d\t%s\n", i, s)
-					}
-				}
-
-			case ".contacts":
-				for i, c := range engine.Contacts {
-					if c != nil {
-						fmt.Fprintf(output, "%d\t%s\n", i, c)
-					}
-				}
-
-			case ".add-contact":
-				if rest == "" {
-					log.Println(".add-contact [session number] OR [<name>@<address>:<port>]")
-					continue
-				}
-				var p *Profile
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err == nil {
-					if sess, ok := engine.GetSession(n); ok {
-						p = sess.Other
-						if p == nil {
-							log.Printf("session %d had a nil Other", n)
-							continue
-						}
-					} else {
-						log.Printf("%d not found\n", n)
-						continue
-					}
-
-				} else {
-					p, err = ParseProfile(rest)
+				case "edit":
+					p, err := ParseProfile(cmd.args[0])
 					if err != nil {
 						log.Println(err)
 						continue
 					}
+
+					err = WriteProfile(p, *meProfile)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					engine.Me = p
 				}
 
-				// overwrite contact if existing Equal() one found
-				// TODO: do i really want to overwrite? what about having 2
-				// contacts with different names but the same address?
-				// i guess the question boils down to the definition of Profile
-				if index := engine.FindContact(p); index >= 0 {
-					old := engine.Contacts[index]
-					engine.Contacts[index] = p
-					log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
-				} else {
-					engine.AddContact(p)
-					log.Printf("added %s\n", p)
-				}
+			case "contacts":
 
-				err = WriteContacts(engine.Contacts, *contactsFile)
-				if err != nil {
-					log.Println(err)
-					log.Println("did not save changes to disk")
-				}
+				switch cmd = *cmd.leaf(); cmd.cmd {
+				case "list":
+					for i, c := range engine.Contacts {
+						if c != nil {
+							fmt.Fprintf(output, "%d\t%s\n", i, c)
+						}
+					}
 
-			case ".del-contact":
-				if rest == "" {
-					log.Println(".del-contact [contact number]")
-					continue
-				}
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
+				case "add":
+					var p *Profile
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
+					if err == nil {
+						if sess, ok := engine.GetSession(n); ok {
+							p = sess.Other
+							if p == nil {
+								log.Printf("session %d had a nil Other", n)
+								continue
+							}
+						} else {
+							log.Printf("%d not found\n", n)
+							continue
+						}
 
-				removed := engine.Contacts[n]
-				if engine.RemoveContact(n) {
-					log.Printf("deleted %s\n", removed)
+					} else {
+						p, err = ParseProfile(arg)
+						if err != nil {
+							log.Println(err)
+							continue
+						}
+					}
+
+					// overwrite contact if existing Equal() one found
+					// TODO: do i really want to overwrite? what about having 2
+					// contacts with different names but the same address?
+					// i guess the question boils down to the definition of Profile
+					if index := engine.FindContact(p); index >= 0 {
+						old := engine.Contacts[index]
+						engine.Contacts[index] = p
+						log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
+					} else {
+						engine.AddContact(p)
+						log.Printf("added %s\n", p)
+					}
 
 					err = WriteContacts(engine.Contacts, *contactsFile)
 					if err != nil {
 						log.Println(err)
 						log.Println("did not save changes to disk")
 					}
-				} else {
-					log.Printf("%d not found\n", n)
-				}
 
-			case ".ping": // .ping [contact number]
-				if rest == "" {
-					log.Println(".ping [contact number] OR [<name>@<address>:<port>]")
-					continue
-				}
-				var p *Profile
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err == nil {
-					if p, _ = engine.GetContact(n); p == nil {
-						log.Printf("%d not found\n", n)
-						continue
-					}
-				} else {
-					p, err = ParseProfile(rest)
+				case "delete":
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
 					if err != nil {
 						log.Println(err)
 						continue
 					}
-					if i := engine.FindContact(p); i >= 0 {
-						p = engine.Contacts[i] // use profile from contacts if available
+
+					removed := engine.Contacts[n]
+					if engine.RemoveContact(n) {
+						log.Printf("deleted %s\n", removed)
+
+						err = WriteContacts(engine.Contacts, *contactsFile)
+						if err != nil {
+							log.Println(err)
+							log.Println("did not save changes to disk")
+						}
+					} else {
+						log.Printf("%d not found\n", n)
+					}
+				}
+
+			case "requests":
+				switch cmd = *cmd.leaf(); cmd.cmd {
+				case "list":
+					for i, r := range engine.Requests {
+						if r != nil {
+							fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
+								r.Profile,
+								r.Time().Format(time.Kitchen),
+								time.Since(r.Time()))
+						}
 					}
 
+				case "accept":
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					if _, ok := engine.GetRequest(n); !ok {
+						log.Printf("%d not found\n", n)
+						continue
+					}
+
+					err = engine.AcceptRequest(engine.Requests[n])
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					log.Println("request accepted")
+
+				case "reject":
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+
+					if engine.RemoveRequest(n) {
+						log.Println("removed request")
+					} else {
+						log.Printf("%d not found\n", n)
+					}
 				}
 
-				err = engine.SendRequest(p)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				log.Println("request sent")
+			case "sessions":
+				switch cmd = *cmd.leaf(); cmd.cmd {
+				case "list":
+					for i, s := range engine.Sessions {
+						if s != nil {
+							fmt.Fprintf(output, "%d\t%s\n", i, s)
+						}
+					}
 
-			case ".drop": // .drop [session number]
-				if rest == "" {
-					log.Println(".drop [session number]")
-					continue
-				}
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
+				case "start":
+					var p *Profile
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
+					if err == nil {
+						if p, _ = engine.GetContact(n); p == nil {
+							log.Printf("%d not found\n", n)
+							continue
+						}
+					} else {
+						p, err = ParseProfile(arg)
+						if err != nil {
+							log.Println(err)
+							continue
+						}
+						if i := engine.FindContact(p); i >= 0 {
+							p = engine.Contacts[i] // use profile from contacts if available
+						}
 
-				if engine.RemoveSession(n) {
-					log.Println("dropped session")
-				} else {
-					log.Printf("%d not found\n", n)
-				}
+					}
 
-			case ".accept": // .accept [request number]
-				if rest == "" {
-					log.Println(".accept [request number]")
-					continue
-				}
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if _, ok := engine.GetRequest(n); !ok {
-					log.Printf("%d not found\n", n)
-					continue
-				}
+					err = engine.SendRequest(p)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					log.Println("request sent")
 
-				err = engine.AcceptRequest(engine.Requests[n])
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				log.Println("request accepted")
+				case "drop":
+					arg := cmd.args[0]
+					n, err := strconv.Atoi(arg)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
 
-			case ".reject": // .reject [request number]
-				if rest == "" {
-					log.Println(".reject [request number]")
-					continue
-				}
-				arg := strings.SplitN(rest, " ", 2)[0]
-				n, err := strconv.Atoi(arg)
-				if err != nil {
-					log.Println(err)
-					continue
+					if engine.RemoveSession(n) {
+						log.Println("dropped session")
+					} else {
+						log.Printf("%d not found\n", n)
+					}
 				}
 
-				if engine.RemoveRequest(n) {
-					log.Println("removed request")
-				} else {
-					log.Printf("%d not found\n", n)
-				}
-
-			case ".msg": // .msg [session number] [text]
-				if rest == "" {
-					log.Println(".msg [session number] [text]")
-					continue
-				}
-				parts = strings.SplitN(rest, " ", 2)
-				n, err := strconv.Atoi(parts[0])
+			case "msg":
+				n, err := strconv.Atoi(cmd.args[0])
 				if err != nil {
 					log.Println(err)
 					continue
@@ -313,25 +295,15 @@ func main() {
 					continue
 				}
 
-				if len(parts) < 2 {
-					log.Println("no message content")
-					continue
-				}
-
-				err = engine.Sessions[n].SendText(parts[1])
+				err = engine.Sessions[n].SendText(cmd.args[1])
 				if err != nil {
 					log.Println(err)
 					continue
 				}
 				log.Println("sent")
 
-			case ".show": // .show [session number]
-				if rest == "" {
-					log.Println(".show [session number]")
-					continue
-				}
-				parts = strings.SplitN(rest, " ", 2)
-				n, err := strconv.Atoi(parts[0])
+			case "show":
+				n, err := strconv.Atoi(cmd.args[0])
 				if err != nil {
 					log.Println(err)
 					continue
@@ -361,25 +333,12 @@ func main() {
 	log.Println("exiting program")
 }
 
-func console(cmdQueue chan []string) {
+func console(cmds commanddefs, cmdQueue chan parsedcmd) {
 	scan := bufio.NewScanner(os.Stdin)
 	for scan.Scan() {
 		line := scan.Text()
-		front, back := split(line)
-		cmdQueue <- []string{front, back}
-
-		// log.Printf("%q, %q\n", front, back)
-		p := cmds.parse(line)
-		if p.err != nil {
-			fmt.Printf("Error:\t%s\nUsage:\n%s\n", p.err, p.leaf().usage(1))
-		} else {
-			p.leaf().run()
-			// for sub := &p; sub != nil; sub = sub.sub {
-			// 	log.Printf("%+v err: %v\n", sub, sub.err)
-			// 	// sub.run()
-			// 	sub.leaf().run()
-			// }
-		}
+		pcmd := cmds.parse(line)
+		cmdQueue <- pcmd
 	}
 }
 
@@ -589,135 +548,147 @@ func (p parsedcmd) usage(lvl int) string {
 	return p.usagefn(lvl)
 }
 
-var cmds = commanddefs{
-	"help": {
-		cmd:      "help",
-		helptext: "show information about commands",
-	},
+// String rebuilds parsedcmd to the original (space trimmed)
+// string from which it was parsed.
+func (p parsedcmd) String() string {
+	if p.sub == nil {
+		return p.cmd + " " + strings.Join(p.args, " ")
+	}
+	return p.cmd + " " + p.sub.String()
+}
 
-	"exit": {
-		cmd:      "exit",
-		helptext: "exit the chat client",
-	},
+// makeCommands defines the REPL commands used in the program.
+func makeCommands() commanddefs {
+	return commanddefs{
+		"help": {
+			cmd:      "help",
+			helptext: "show information about commands",
+		},
 
-	"ip": {
-		cmd:      "ip",
-		helptext: "display your current external IP and port chat client is using",
-	},
+		"exit": {
+			cmd:      "exit",
+			helptext: "exit the chat client",
+		},
 
-	"me": {
-		cmd:        "me",
-		helptext:   "view and change user profile",
-		defaultSub: "show",
-		subcmds: commanddefs{
-			"show": {
-				cmd:      "show",
-				helptext: "display user information",
-			},
-			"edit": {
-				cmd:      "edit",
-				helptext: "modify user information",
-				args: []argdef{
-					{"PROFILE", re(profile)},
+		"ip": {
+			cmd:      "ip",
+			helptext: "display your current external IP and port chat client is using",
+		},
+
+		"me": {
+			cmd:        "me",
+			helptext:   "view and change user profile",
+			defaultSub: "show",
+			subcmds: commanddefs{
+				"show": {
+					cmd:      "show",
+					helptext: "display user information",
+				},
+				"edit": {
+					cmd:      "edit",
+					helptext: "modify user information",
+					args: []argdef{
+						{"PROFILE", re(profile)},
+					},
 				},
 			},
 		},
-	},
 
-	"contacts": {
-		cmd:        "contacts",
-		helptext:   "manage contacts",
-		defaultSub: "list",
-		subcmds: commanddefs{
-			"list": {
-				cmd:        "list",
-				helptext:   "list all contacts",
-				defaultSub: "all",
-			},
-			"add": {
-				cmd:      "add",
-				helptext: "add a new contact from an existing session or profile",
-				args: []argdef{
-					{"PROFILE", re(profile)},
-					{"SESSION_NUMBER", re(integer)},
+		"contacts": {
+			cmd:        "contacts",
+			helptext:   "manage contacts",
+			defaultSub: "list",
+			subcmds: commanddefs{
+				"list": {
+					cmd:        "list",
+					helptext:   "list all contacts",
+					defaultSub: "all",
 				},
-			},
-			"delete": {
-				cmd:      "delete",
-				helptext: "delete a contacts",
-				args: []argdef{
-					{"CONTACT_NUMBER", re(integer)},
+				"add": {
+					cmd:      "add",
+					helptext: "add a new contact from an existing session or profile",
+					args: []argdef{
+						{"PROFILE", re(profile)},
+						{"SESSION_NUMBER", re(integer)},
+					},
+				},
+				"delete": {
+					cmd:      "delete",
+					helptext: "delete a contacts",
+					args: []argdef{
+						{"CONTACT_NUMBER", re(integer)},
+					},
 				},
 			},
 		},
-	},
 
-	"requests": {
-		cmd:        "requests",
-		helptext:   "manage requests for chat",
-		defaultSub: "list",
-		subcmds: commanddefs{
-			"list": {
-				cmd:      "list",
-				helptext: "display waiting requests",
-			},
-			"reject": {
-				cmd:      "reject",
-				helptext: "refuse a chat request",
-				args: []argdef{
-					{"REQUEST_NUMBER", re(integer)},
+		"requests": {
+			cmd:        "requests",
+			helptext:   "manage requests for chat",
+			defaultSub: "list",
+			subcmds: commanddefs{
+				"list": {
+					cmd:      "list",
+					helptext: "display waiting requests",
 				},
-			},
-			"accept": {
-				cmd:      "accept",
-				helptext: "accept chat request and begin a session",
-				args: []argdef{
-					{"REQUEST_NUMBER", re(integer)},
+				"accept": {
+					cmd:      "accept",
+					helptext: "accept chat request and begin a session",
+					args: []argdef{
+						{"REQUEST_NUMBER", re(integer)},
+					},
 				},
-			},
-		},
-	},
-
-	"sessions": {
-		cmd:        "sessions",
-		helptext:   "manage chat sessions",
-		defaultSub: "list",
-		subcmds: commanddefs{
-			"list": {
-				cmd:      "list",
-				helptext: "display all pending and active sessions",
-			},
-			"drop": {
-				cmd:      "drop",
-				helptext: "end a session",
-				args: []argdef{
-					{"SESSION_NUMBER", re(integer)},
-				},
-			},
-			"start": {
-				cmd:      "start",
-				helptext: "ping another user to a session",
-				args: []argdef{
-					{"CONTACT_NUMBER", re(integer)},
-					{"PROFILE", re(profile)},
+				"reject": {
+					cmd:      "reject",
+					helptext: "refuse a chat request",
+					args: []argdef{
+						{"REQUEST_NUMBER", re(integer)},
+					},
 				},
 			},
 		},
-	},
 
-	"msg": {
-		cmd:      "msg",
-		helptext: "sends a message",
-		args: []argdef{
-			{"SESSION_NUMBER MESSAGE", re(integer, rest)},
+		"sessions": {
+			cmd:        "sessions",
+			helptext:   "manage chat sessions",
+			defaultSub: "list",
+			subcmds: commanddefs{
+				"list": {
+					cmd:      "list",
+					helptext: "display all pending and active sessions",
+				},
+				"start": {
+					cmd:      "start",
+					helptext: "ping another user to a session",
+					args: []argdef{
+						{"CONTACT_NUMBER", re(integer)},
+						{"PROFILE", re(profile)},
+					},
+				},
+				"drop": {
+					cmd:      "drop",
+					helptext: "end a session",
+					args: []argdef{
+						{"SESSION_NUMBER", re(integer)},
+					},
+				},
+			},
 		},
-	},
 
-	"show": {
-		cmd:      "show",
-		helptext: "show last few messages for a particular session",
-		args: []argdef{
-			{"SESSION_NUMBER", re(integer)},
+		"msg": {
+			cmd:      "msg",
+			helptext: "sends a message",
+			args: []argdef{
+				{"SESSION_NUMBER MESSAGE", re(integer, rest)},
+			},
 		},
-	},
+
+		"show": {
+			cmd:      "show",
+			helptext: "show last few messages for a particular session",
+			args: []argdef{
+				{"SESSION_NUMBER", re(integer)},
+			},
+		},
+	}
 }
