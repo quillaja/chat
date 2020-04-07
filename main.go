@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -58,275 +57,306 @@ func main() {
 
 	// process input
 	cmds := makeCommands()
-	lineQueue := make(chan string)
-	console := NewConsole(lineQueue, "%s > ")
-	console.Run(os.Stdin)
+
+	console := NewConsole(os.Stdin, "%s > ")
+	console.Run()
+	botR, botW := io.Pipe()
+	bot := NewConsole(botR, "")
+	bot.Run()
+
+	// go func() {
+	// 	console.Prompt(false)
+	// 	// time.Sleep(5 * time.Second)
+	// 	botW.Write([]byte("me\n"))
+	// 	// time.Sleep(5 * time.Second)
+	// 	botW.Write([]byte("ip\n"))
+	// 	console.Prompt(true)
+	// }()
+	// time.Sleep(100 * time.Millisecond) // give 'bot' chance to run
 
 	for done := false; !done; {
-		console.Advance()
+		var line string
+		console.SetInner(time.Now().Format("3:04:05 PM"))
+
+		// get first input from sig, console, or bot
 		select {
 		case <-sig:
 			done = true
 			cancel()
 
-		case line := <-lineQueue:
+		case line = <-bot.Read():
+		case line = <-console.Read():
+		}
 
-			cmd := cmds.parse(line)
-			if cmd.err != nil {
+		// parse raw line into command struct
+		cmd := cmds.parse(line)
+		if cmd.err != nil {
+			if cmd.cmd != "" { // ignore blank lines
 				log.Printf("Error: %s\n", cmd.err)
+			}
+			continue
+		}
+
+		// process specific command
+		switch cmd.cmd {
+		case "exit":
+			done = true
+			cancel()
+
+		case "help":
+			// fmt.Fprintln(output, cmds.help()) // uses commanddefs
+
+			// this seems to "Work"
+			go func() {
+				console.Prompt(false)
+				botW.Write([]byte("me\n"))
+				time.Sleep(5 * time.Second)
+				botW.Write([]byte("ip\n"))
+				console.Prompt(true)
+			}()
+			time.Sleep(100 * time.Millisecond) // give 'bot' chance to run
+
+		case "ip":
+			fmt.Fprintln(output, "getting external ip...")
+			ip, err := GetIP()
+			if err != nil {
+				log.Println(err)
 				continue
 			}
+			fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, engine.Me.Port)
 
-			switch cmd.cmd {
-			case "exit":
-				done = true
-				cancel()
+		case "me":
+			switch cmd = *cmd.leaf(); cmd.cmd {
+			case "show":
+				fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
 
-			case "help":
-				fmt.Fprintln(output, cmds.help()) // uses commanddefs
-
-			case "ip":
-				fmt.Fprintln(output, "getting external ip...")
-				ip, err := GetIP()
+			case "edit":
+				p, err := ParseProfile(cmd.args[0])
 				if err != nil {
 					log.Println(err)
 					continue
 				}
-				fmt.Fprintf(output, "external IP address:\t%s\nlistening on port:\t%s\n", ip, engine.Me.Port)
 
-			case "me":
-				switch cmd = *cmd.leaf(); cmd.cmd {
-				case "show":
-					fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
+				err = WriteProfile(p, *meProfile)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				engine.Me = p
+			}
 
-				case "edit":
-					p, err := ParseProfile(cmd.args[0])
-					if err != nil {
-						log.Println(err)
-						continue
+		case "contacts":
+
+			switch cmd = *cmd.leaf(); cmd.cmd {
+			case "list":
+				for i, c := range engine.Contacts {
+					if c != nil {
+						fmt.Fprintf(output, "%d\t%s\n", i, c)
 					}
-
-					err = WriteProfile(p, *meProfile)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-					engine.Me = p
 				}
 
-			case "contacts":
-
-				switch cmd = *cmd.leaf(); cmd.cmd {
-				case "list":
-					for i, c := range engine.Contacts {
-						if c != nil {
-							fmt.Fprintf(output, "%d\t%s\n", i, c)
-						}
-					}
-
-				case "add":
-					var p *Profile
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err == nil {
-						if sess, ok := engine.GetSession(n); ok {
-							p = sess.Other
-							if p == nil {
-								log.Printf("session %d had a nil Other", n)
-								continue
-							}
-						} else {
-							log.Printf("%d not found\n", n)
+			case "add":
+				var p *Profile
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err == nil {
+					if sess, ok := engine.GetSession(n); ok {
+						p = sess.Other
+						if p == nil {
+							log.Printf("session %d had a nil Other", n)
 							continue
 						}
-
 					} else {
-						p, err = ParseProfile(arg)
-						if err != nil {
-							log.Println(err)
-							continue
-						}
+						log.Printf("%d not found\n", n)
+						continue
 					}
 
-					// overwrite contact if existing Equal() one found
-					// TODO: do i really want to overwrite? what about having 2
-					// contacts with different names but the same address?
-					// i guess the question boils down to the definition of Profile
-					if index := engine.FindContact(p); index >= 0 {
-						old := engine.Contacts[index]
-						engine.Contacts[index] = p
-						log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
-					} else {
-						engine.AddContact(p)
-						log.Printf("added %s\n", p)
+				} else {
+					p, err = ParseProfile(arg)
+					if err != nil {
+						log.Println(err)
+						continue
 					}
+				}
+
+				// overwrite contact if existing Equal() one found
+				// TODO: do i really want to overwrite? what about having 2
+				// contacts with different names but the same address?
+				// i guess the question boils down to the definition of Profile
+				if index := engine.FindContact(p); index >= 0 {
+					old := engine.Contacts[index]
+					engine.Contacts[index] = p
+					log.Printf("overwrote #%d '%s' with '%s'\n", index, old, p)
+				} else {
+					engine.AddContact(p)
+					log.Printf("added %s\n", p)
+				}
+
+				err = WriteContacts(engine.Contacts, *contactsFile)
+				if err != nil {
+					log.Println(err)
+					log.Println("did not save changes to disk")
+				}
+
+			case "delete":
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				removed := engine.Contacts[n]
+				if engine.RemoveContact(n) {
+					log.Printf("deleted %s\n", removed)
 
 					err = WriteContacts(engine.Contacts, *contactsFile)
 					if err != nil {
 						log.Println(err)
 						log.Println("did not save changes to disk")
 					}
-
-				case "delete":
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-
-					removed := engine.Contacts[n]
-					if engine.RemoveContact(n) {
-						log.Printf("deleted %s\n", removed)
-
-						err = WriteContacts(engine.Contacts, *contactsFile)
-						if err != nil {
-							log.Println(err)
-							log.Println("did not save changes to disk")
-						}
-					} else {
-						log.Printf("%d not found\n", n)
-					}
-				}
-
-			case "requests":
-				switch cmd = *cmd.leaf(); cmd.cmd {
-				case "list":
-					for i, r := range engine.Requests {
-						if r != nil {
-							fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
-								r.Profile,
-								r.Time().Format(time.Kitchen),
-								time.Since(r.Time()))
-						}
-					}
-
-				case "accept":
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-					if _, ok := engine.GetRequest(n); !ok {
-						log.Printf("%d not found\n", n)
-						continue
-					}
-
-					err = engine.AcceptRequest(engine.Requests[n])
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-					log.Println("request accepted")
-
-				case "reject":
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-
-					if engine.RemoveRequest(n) {
-						log.Println("removed request")
-					} else {
-						log.Printf("%d not found\n", n)
-					}
-				}
-
-			case "sessions":
-				switch cmd = *cmd.leaf(); cmd.cmd {
-				case "list":
-					for i, s := range engine.Sessions {
-						if s != nil {
-							fmt.Fprintf(output, "%d\t%s\n", i, s)
-						}
-					}
-
-				case "start":
-					var p *Profile
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err == nil {
-						if p, _ = engine.GetContact(n); p == nil {
-							log.Printf("%d not found\n", n)
-							continue
-						}
-					} else {
-						p, err = ParseProfile(arg)
-						if err != nil {
-							log.Println(err)
-							continue
-						}
-						if i := engine.FindContact(p); i >= 0 {
-							p = engine.Contacts[i] // use profile from contacts if available
-						}
-
-					}
-
-					err = engine.SendRequest(p)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-					log.Println("request sent")
-
-				case "drop":
-					arg := cmd.args[0]
-					n, err := strconv.Atoi(arg)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-
-					if engine.RemoveSession(n) {
-						log.Println("dropped session")
-					} else {
-						log.Printf("%d not found\n", n)
-					}
-				}
-
-			case "msg":
-				n, err := strconv.Atoi(cmd.args[0])
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if _, ok := engine.GetSession(n); !ok {
-					log.Printf("%d not found\n", n)
-					continue
-				}
-
-				err = engine.Sessions[n].SendText(cmd.args[1])
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				log.Println("sent")
-
-			case "show":
-				n, err := strconv.Atoi(cmd.args[0])
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if s, ok := engine.GetSession(n); !ok {
-					log.Printf("%d not found\n", n)
-					continue
 				} else {
-					const num = 5
-					start := len(s.Msgs) - num
-					if start < 0 {
-						start = 0
-					} // clamp
-					show := s.Msgs[start:]
-					for i, t := range show {
-						fmt.Fprintf(output, "%d %s\t| %s > %s\n", i,
-							t.From().Name,
-							t.TimeStamp.Time().Format(time.Kitchen),
-							t.Message)
+					log.Printf("%d not found\n", n)
+				}
+			}
+
+		case "requests":
+			switch cmd = *cmd.leaf(); cmd.cmd {
+			case "list":
+				for i, r := range engine.Requests {
+					if r != nil {
+						fmt.Fprintf(output, "%d\t%s at %s (%s ago)\n", i,
+							r.Profile,
+							r.Time().Format(time.Kitchen),
+							time.Since(r.Time()))
 					}
+				}
+
+			case "accept":
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				if _, ok := engine.GetRequest(n); !ok {
+					log.Printf("%d not found\n", n)
+					continue
+				}
+
+				err = engine.AcceptRequest(engine.Requests[n])
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				log.Println("request accepted")
+
+			case "reject":
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				if engine.RemoveRequest(n) {
+					log.Println("removed request")
+				} else {
+					log.Printf("%d not found\n", n)
+				}
+			}
+
+		case "sessions":
+			switch cmd = *cmd.leaf(); cmd.cmd {
+			case "list":
+				for i, s := range engine.Sessions {
+					if s != nil {
+						fmt.Fprintf(output, "%d\t%s\n", i, s)
+					}
+				}
+
+			case "start":
+				var p *Profile
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err == nil {
+					if p, _ = engine.GetContact(n); p == nil {
+						log.Printf("%d not found\n", n)
+						continue
+					}
+				} else {
+					p, err = ParseProfile(arg)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					if i := engine.FindContact(p); i >= 0 {
+						p = engine.Contacts[i] // use profile from contacts if available
+					}
+
+				}
+
+				err = engine.SendRequest(p)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				log.Println("request sent")
+
+			case "drop":
+				arg := cmd.args[0]
+				n, err := strconv.Atoi(arg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				if engine.RemoveSession(n) {
+					log.Println("dropped session")
+				} else {
+					log.Printf("%d not found\n", n)
+				}
+			}
+
+		case "msg":
+			n, err := strconv.Atoi(cmd.args[0])
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			if _, ok := engine.GetSession(n); !ok {
+				log.Printf("%d not found\n", n)
+				continue
+			}
+
+			err = engine.Sessions[n].SendText(cmd.args[1])
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			log.Println("sent")
+
+		case "show":
+			n, err := strconv.Atoi(cmd.args[0])
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			if s, ok := engine.GetSession(n); !ok {
+				log.Printf("%d not found\n", n)
+				continue
+			} else {
+				const num = 5
+				start := len(s.Msgs) - num
+				if start < 0 {
+					start = 0
+				} // clamp
+				show := s.Msgs[start:]
+				for i, t := range show {
+					fmt.Fprintf(output, "%d %s\t| %s > %s\n", i,
+						t.From().Name,
+						t.TimeStamp.Time().Format(time.Kitchen),
+						t.Message)
 				}
 			}
 		}
@@ -336,54 +366,64 @@ func main() {
 	log.Println("exiting program")
 }
 
-func (c *Console) Run(r io.Reader) {
-
-	scan := bufio.NewReader(r)
+func (c *Console) Run() {
 	go func() {
 		// this gofunc never exits "correctly" since i can't figure
 		// out how to "unblock" ReadString()
-		for range c.prompt {
-			// fmt.Printf("reading %q\n", c.display)
-			fmt.Print(c.display)
-			line, err := scan.ReadString('\n')
-			// fmt.Printf("got: %s\n", line)
-			line = strings.TrimSuffix(line, "\n") // trim trailing newline
-			if err == nil && len(line) > 0 {
-				c.Lines <- line
+		for {
+			c.scan.Scan()
+			line := c.scan.Text()
+			err := c.scan.Err()
+			// line, err := c.scan.ReadString('\n')
+			// line = strings.TrimSuffix(line, "\n") // trim trailing newline
+			if err == nil { //&& len(line) > 0 {
+				c.lines <- line
+			}
+			if err != nil {
+				log.Println(err)
 			}
 		}
 	}()
-
 }
 
-// Advance must be placed at the top of the for loop
-func (c *Console) Advance() {
-	c.prompt <- struct{}{}
+func (c *Console) Prompt(on bool) {
+	c.showPrompt = on
 }
 
-func (c *Console) SetInner(s string) {
-	if c.Format == "" {
-		c.Format = "%s"
+func (c *Console) Read() chan string {
+	if c.showPrompt {
+		fmt.Print(c.display)
 	}
-	c.display = fmt.Sprintf(c.Format, s)
+	return c.lines
+}
+
+// SetInner sets a default Format if necessary, and sets the prompt
+// according to Format where s is the "%s" term in Format.
+func (c *Console) SetInner(s string) {
+	if c.format == "" {
+		c.format = "%s"
+	}
+	c.display = fmt.Sprintf(c.format, s)
 }
 
 type Console struct {
-	Format  string
-	display string
-	prompt  chan struct{}
-	Lines   chan string
+	format     string
+	display    string
+	reader     io.Reader
+	lines      chan string
+	scan       *bufio.Scanner
+	showPrompt bool
 }
 
-func NewConsole(lines chan string, format string) *Console {
+func NewConsole(r io.Reader, format string) *Console {
 	c := &Console{
-		Format: format,
-		Lines:  lines,
+		format:     format,
+		reader:     r,
+		lines:      make(chan string),
+		scan:       bufio.NewScanner(r),
+		showPrompt: true,
 	}
-	if c.display == "" {
-		c.SetInner("")
-	}
-	c.prompt = make(chan struct{})
+	c.SetInner("")
 	return c
 }
 
