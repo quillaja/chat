@@ -58,11 +58,12 @@ func main() {
 	// process input
 	cmds := makeCommands()
 
-	console := NewConsole(os.Stdin, "%s > ")
-	console.Run()
+	console := NewConsole(os.Stdin)
+	console.Format = "%s > "
+	go console.Run()
 	botR, botW := io.Pipe()
-	bot := NewConsole(botR, "")
-	bot.Run()
+	bot := NewConsole(botR)
+	go bot.Run()
 
 	// go func() {
 	// 	console.Prompt(false)
@@ -76,7 +77,7 @@ func main() {
 
 	for done := false; !done; {
 		var line string
-		console.SetInner(time.Now().Format("3:04:05 PM"))
+		console.SetPrompt(time.Now().Format("3:04:05 PM"))
 
 		// get first input from sig, console, or bot
 		select {
@@ -108,11 +109,11 @@ func main() {
 
 			// this seems to "Work"
 			go func() {
-				console.Prompt(false)
+				console.EnablePrompt(false)
 				botW.Write([]byte("me\n"))
 				time.Sleep(5 * time.Second)
 				botW.Write([]byte("ip\n"))
-				console.Prompt(true)
+				console.EnablePrompt(true)
 			}()
 			time.Sleep(100 * time.Millisecond) // give 'bot' chance to run
 
@@ -366,64 +367,69 @@ func main() {
 	log.Println("exiting program")
 }
 
+// Run begins the read loop on Console's io.Reader. It blocks, so normally
+// call this method as a gofunc.
 func (c *Console) Run() {
-	go func() {
-		// this gofunc never exits "correctly" since i can't figure
-		// out how to "unblock" ReadString()
-		for {
-			c.scan.Scan()
-			line := c.scan.Text()
-			err := c.scan.Err()
-			// line, err := c.scan.ReadString('\n')
-			// line = strings.TrimSuffix(line, "\n") // trim trailing newline
-			if err == nil { //&& len(line) > 0 {
-				c.lines <- line
-			}
-			if err != nil {
-				log.Println(err)
-			}
+	// go func() {
+	// this gofunc never exits "correctly" since i can't figure
+	// out how to "unblock" ReadString()
+	for {
+		c.scan.Scan()
+		line := c.scan.Text()
+		err := c.scan.Err()
+		// line, err := c.scan.ReadString('\n')
+		// line = strings.TrimSuffix(line, "\n") // trim trailing newline
+		if err == nil { //&& len(line) > 0 {
+			c.lines <- line
 		}
-	}()
+		if err != nil {
+			log.Println(err)
+		}
+	}
+	// }()
 }
 
-func (c *Console) Prompt(on bool) {
+// EnablePrompt turns on or off the prompt display.
+func (c *Console) EnablePrompt(on bool) {
 	c.showPrompt = on
 }
 
+// Read returns a channel from which a 'line' can be obtained.
 func (c *Console) Read() chan string {
 	if c.showPrompt {
-		fmt.Print(c.display)
+		fmt.Print(c.prompt)
 	}
 	return c.lines
 }
 
-// SetInner sets a default Format if necessary, and sets the prompt
-// according to Format where s is the "%s" term in Format.
-func (c *Console) SetInner(s string) {
-	if c.format == "" {
-		c.format = "%s"
+// SetPrompt sets the prompt according to Format where s is the "%s" term in Format.
+// If Format is an empty string, the prompt is set to s.
+func (c *Console) SetPrompt(s string) {
+	if c.Format == "" {
+		c.prompt = s
+	} else {
+		c.prompt = fmt.Sprintf(c.Format, s)
 	}
-	c.display = fmt.Sprintf(c.format, s)
 }
 
+// Console abstracts the line-by-line reading of text, using an optional prompt.
 type Console struct {
-	format     string
-	display    string
+	Format     string
+	prompt     string
+	showPrompt bool
 	reader     io.Reader
 	lines      chan string
 	scan       *bufio.Scanner
-	showPrompt bool
 }
 
-func NewConsole(r io.Reader, format string) *Console {
+// NewConsole makes a new Console.
+func NewConsole(r io.Reader) *Console {
 	c := &Console{
-		format:     format,
+		showPrompt: true,
 		reader:     r,
 		lines:      make(chan string),
 		scan:       bufio.NewScanner(r),
-		showPrompt: true,
 	}
-	c.SetInner("")
 	return c
 }
 
