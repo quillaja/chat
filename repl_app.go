@@ -58,7 +58,8 @@ func NewReplApp(meProfileFile, contactsFile string, output io.Writer) App {
 
 	// setup console
 	ui.console = NewConsole(os.Stdin)
-	ui.console.Format = "%s > "
+	ui.console.Format = func() string { return time.Now().Format("3:04:05 PM") + " > " }
+	// ui.console.Format = func() string { return ui.engine.Me.Name + " > " }
 
 	return ui
 }
@@ -71,7 +72,7 @@ func (ui *ReplApp) Run() {
 	// start chat engine
 	ui.engine.Start(ctx)
 	// start repl console
-	go ui.console.Run()
+	ui.console.Run(ctx)
 
 	ui.loop() // blocks until "quit"
 }
@@ -219,8 +220,6 @@ func (ui *ReplApp) loop() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
 	for {
-		ui.console.SetPrompt(time.Now().Format("3:04:05 PM"))
-
 		// get first input from sig, console, or bot
 		var line string
 		select {
