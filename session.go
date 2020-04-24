@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 	"time"
@@ -12,14 +11,15 @@ import (
 // chat clients, most important of which is likely the shared key for AES
 // encryption.
 type Session struct {
-	Status      SessionStatus
-	PrivKey     *rsa.PrivateKey
-	SharedKey   []byte
-	Me          *Profile
-	Other       *Profile
-	OtherPubKey *rsa.PublicKey
-	Expires     time.Time
-	Msgs        []*Text
+	Status         SessionStatus
+	ID             uint64
+	SessionPubKey  []byte
+	SessionPrivKey []byte
+	SharedKey      []byte
+	Me             *Profile
+	Other          *Profile
+	Expires        time.Time
+	Msgs           []*Text
 }
 
 // SessionIdleTimeout is the length of time a Session can go without
@@ -76,7 +76,7 @@ func BeginSession(me *Profile, req *Request) (*Session, *Response, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	encKey, err := RSAEncrypt(k, req.PublicKey)
+	encKey, err := RSAEncrypt(k, req.PublicSigningKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,7 +97,7 @@ func BeginSession(me *Profile, req *Request) (*Session, *Response, error) {
 		SharedKey:   k,
 		Me:          me,
 		Other:       req.Profile,
-		OtherPubKey: req.PublicKey,
+		OtherPubKey: req.PublicSigningKey,
 		Expires:     time.Now().Add(SessionIdleTimeout),
 		Msgs:        make([]*Text, 0),
 	}
@@ -146,7 +146,7 @@ func (s *Session) Upgrade(resp *Response) error {
 	if err != nil {
 		return err
 	}
-	if !ValidSignatureRSA512(resp.KeySignature, resp.SharedKey, resp.Request.PublicKey) {
+	if !ValidSignatureRSA512(resp.KeySignature, resp.SharedKey, resp.Request.PublicSigningKey) {
 		return fmt.Errorf("invalid signature")
 	}
 
@@ -154,7 +154,7 @@ func (s *Session) Upgrade(resp *Response) error {
 	// upgrade session
 	s.Status = Active
 	s.SharedKey = sharedKey
-	s.OtherPubKey = resp.Request.PublicKey
+	s.OtherPubKey = resp.Request.PublicSigningKey
 	s.Other = resp.Request.Profile
 
 	s.ExtendExpiration()

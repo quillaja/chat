@@ -4,12 +4,15 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 /*
@@ -174,4 +177,53 @@ func ValidSignatureRSA256(signature, message []byte, senderKey *rsa.PublicKey) (
 		fmt.Println(err) // debug only. non-nil err indicates invalid message/signature
 	}
 	return
+}
+
+/*
+
+curve/ed 25519
+
+*/
+
+// Curve25519KeyPair creates a public and private key pair used for ephemeral
+// ecliptic curve Diffie-Hellman key exchange.
+//
+// See:
+// https://en.wikipedia.org/wiki/Elliptic-curve_Diffie%E2%80%93Hellman
+// https://asecuritysite.com/encryption/go_25519ecdh
+func Curve25519KeyPair() (private, public []byte, err error) {
+	private = make([]byte, 32)
+	rand.Read(private)
+
+	public, err = curve25519.X25519(private, curve25519.Basepoint)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return
+}
+
+// SharedKey creates a Diffie-Hellman shared key using a private key and public key.
+//
+// From: https://asecuritysite.com/encryption/go_25519ecdh
+func SharedKey(myPrivKey, theirPubKey []byte) ([]byte, error) {
+	return curve25519.X25519(myPrivKey, theirPubKey)
+}
+
+// Ed25519KeyPair creates a new keypair for signing.
+func Ed25519KeyPair() (private ed25519.PrivateKey, public ed25519.PublicKey, err error) {
+	// public is 32 byte []byte
+	// private is 64 byte [], containg BOTH private key (aka seed) and public key.
+	public, private, err = ed25519.GenerateKey(rand.Reader)
+	return
+}
+
+// SignEd25519 wraps ed25519.Sign().
+func SignEd25519(senderKey ed25519.PrivateKey, message []byte) (signature []byte) {
+	return ed25519.Sign(senderKey, message)
+}
+
+// ValidSignatureEd25519 wraps ed25519.Verify().
+func ValidSignatureEd25519(signature, message []byte, senderKey ed25519.PublicKey) bool {
+	return ed25519.Verify(senderKey, message, signature)
 }

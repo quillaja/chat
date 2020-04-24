@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -33,27 +34,32 @@ func (ts TimeStamp) Time() time.Time { return time.Unix(int64(ts), 0) }
 
 // Profile contains user identification and connection data.
 type Profile struct {
-	Name    string // name. may contain spaces.
-	Address string // example ipv4 "61.2.73.242" or ipv6 "[::1]" or dns "mytld.com"
-	Port    string // port without : (colon)
+	Name              string             // name. may contain spaces.
+	Address           string             // example ipv4 "61.2.73.242" or ipv6 "[::1]" or dns "mytld.com"
+	Port              string             // port without : (colon)
+	PublicSigningKey  ed25519.PublicKey  // 32 byte
+	PrivateSigningKey ed25519.PrivateKey // 64 byte -- don't send this with Request/Response
 }
 
 // Request is sent to another party when wishing to begin a chat session.
 // The initiating client must provide a RSA public key so that the receiving
 // client can asymetrically encrypt a proposed shared key in the subsequent Response.
 type Request struct {
-	Profile   *Profile
-	PublicKey *rsa.PublicKey
-	TimeStamp // unix time in seconds
+	Profile          *Profile // connection info
+	PublicSessionKey []byte   // 32 byte
+	Signature        []byte   // 64 byte
+	TimeStamp                 // unix time in seconds
 }
 
 // Response is sent to another party when a Request is "accepted".
 // It contains a proposed shared key (aka secret key) to be used to symetrically
 // encrypt subsequent messages (such as Text).
 type Response struct {
-	Request      *Request // info (ie public key) of client sending Response
-	SharedKey    []byte   // RSA encrypted proposed shared key (32 bytes) for this session
-	KeySignature []byte   // RSA signature for SharedKey
+	Profile          *Profile // connection info
+	PublicSessionKey []byte   // 32 byte
+	Signature        []byte   // 64 byte
+	SessionID        uint64
+	TimeStamp
 }
 
 // Text is used to transmit human messages.
@@ -161,9 +167,9 @@ func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
 	}
 
 	r := &Request{
-		Profile:   p,
-		TimeStamp: Now(),
-		PublicKey: &privateKey.PublicKey,
+		Profile:          p,
+		TimeStamp:        Now(),
+		PublicSigningKey: &privateKey.PublicKey,
 	}
 	return r, privateKey, nil
 }
