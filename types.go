@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
-	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -34,11 +34,10 @@ func (ts TimeStamp) Time() time.Time { return time.Unix(int64(ts), 0) }
 
 // Profile contains user identification and connection data.
 type Profile struct {
-	Name              string             // name. may contain spaces.
-	Address           string             // example ipv4 "61.2.73.242" or ipv6 "[::1]" or dns "mytld.com"
-	Port              string             // port without : (colon)
-	PublicSigningKey  ed25519.PublicKey  // 32 byte
-	PrivateSigningKey ed25519.PrivateKey // 64 byte -- don't send this with Request/Response
+	Name             string            // name. may contain spaces.
+	Address          string            // example ipv4 "61.2.73.242" or ipv6 "[::1]" or dns "mytld.com"
+	Port             string            // port without : (colon)
+	PublicSigningKey ed25519.PublicKey // 32 byte
 }
 
 // Request is sent to another party when wishing to begin a chat session.
@@ -47,7 +46,6 @@ type Profile struct {
 type Request struct {
 	Profile          *Profile // connection info
 	PublicSessionKey []byte   // 32 byte
-	Signature        []byte   // 64 byte
 	TimeStamp                 // unix time in seconds
 }
 
@@ -57,7 +55,6 @@ type Request struct {
 type Response struct {
 	Profile          *Profile // connection info
 	PublicSessionKey []byte   // 32 byte
-	Signature        []byte   // 64 byte
 	SessionID        uint64
 	TimeStamp
 }
@@ -115,6 +112,27 @@ func WriteContacts(contacts []*Profile, filename string) error {
 	return ioutil.WriteFile(filename, data, 0644)
 }
 
+// ReadPrivateKey reads a JSON encoded ED25519 private key from filename.
+func ReadPrivateKey(filename string) (privateKey ed25519.PrivateKey, err error) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(data, &privateKey)
+	return
+}
+
+// WritePrivateKey writes an ED25519 private key to filename in JSON.
+func WritePrivateKey(privSigningKey ed25519.PrivateKey, filename string) error {
+	data, err := json.Marshal(privSigningKey)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(filename, data, 0644)
+}
+
 // ParseProfile parses a string in the form <Name>@<Address>:<Port>
 // to a Profile.
 func ParseProfile(raw string) (*Profile, error) {
@@ -147,35 +165,45 @@ func (p *Profile) FullAddress() string { return p.Address + ":" + p.Port }
 //String representation of the profile.
 func (p *Profile) String() string { return p.Name + "@" + p.FullAddress() }
 
-//Equal compares profiles based on FullAddress()
-func (p *Profile) Equal(o *Profile) bool { return o != nil && p.FullAddress() == o.FullAddress() }
+//Equal compares profiles based on address, port, and PublicSigningKey
+func (p *Profile) Equal(o *Profile) bool {
+	return o != nil &&
+		p.Address == o.Address &&
+		p.Port == o.Port &&
+		bytes.Equal(p.PublicSigningKey, o.PublicSigningKey)
+}
 
 //
 // Request stuff
 //
 
 // PrepareRequest performs some of the routine tasks involved in building a
-// Request, namely generating an RSA key pair.
-func PrepareRequest(p *Profile) (*Request, *rsa.PrivateKey, error) {
+// Request, namely generating an curve25519 key pair.
+func PrepareRequest(p *Profile) (r *Request, sessPrivKey []byte, err error) {
 	if p == nil {
 		return nil, nil, fmt.Errorf("nil Profile")
 	}
 
-	privateKey, err := GenerateRSAKeyPair()
+	sessPrivKey, pub, err := Curve25519KeyPair()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	r := &Request{
+	r = &Request{
 		Profile:          p,
+		PublicSessionKey: pub,
 		TimeStamp:        Now(),
-		PublicSigningKey: &privateKey.PublicKey,
 	}
-	return r, privateKey, nil
+	return r, sessPrivKey, nil
 }
 
 // Equal compares one request to another.
-func (r *Request) Equal(o *Request) bool { return o != nil && *r == *o }
+func (r *Request) Equal(o *Request) bool {
+	return o != nil &&
+		r.Profile.Equal(o.Profile) &&
+		bytes.Equal(r.PublicSessionKey, o.PublicSessionKey) &&
+		r.TimeStamp == o.TimeStamp
+}
 
 //
 // Text

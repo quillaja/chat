@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log"
 )
@@ -10,12 +12,13 @@ import (
 // It also simplifys managment of various state by the User Interface and
 // provides a mechanism for incoming events to be communicated to the User Interface.
 type ChatEngine struct {
-	Me       *Profile         // profile in use by this client
-	Contacts []*Profile       // a list of known profiles
-	Sessions []*Session       // chat sessions of all status
-	Requests []*Request       // requests needing approval
-	Events   chan EngineEvent // incoming events to signal the UI that something needs done
-	queue    chan *Message    // queue of messages between Listener() and MessageProcessor()
+	Me          *Profile           // profile in use by this client
+	PrivSignKey ed25519.PrivateKey // 64 byte private key for signing
+	Contacts    []*Profile         // a list of known profiles
+	Sessions    []*Session         // chat sessions of all status
+	Requests    []*Request         // requests needing approval
+	Events      chan EngineEvent   // incoming events to signal the UI that something needs done
+	queue       chan *Message      // queue of messages between Listener() and MessageProcessor()
 }
 
 // EngineEvent communicates engine events to the User Interface.
@@ -38,7 +41,7 @@ const (
 )
 
 // NewChatEngine initializes a new chat engine.
-func NewChatEngine(me *Profile, contacts []*Profile) (*ChatEngine, error) {
+func NewChatEngine(privateKey ed25519.PrivateKey, me *Profile, contacts []*Profile) (*ChatEngine, error) {
 	const defaultListeningPort = "5190" // old AIM port
 	if me == nil {
 		ip, err := GetIP()
@@ -54,13 +57,24 @@ func NewChatEngine(me *Profile, contacts []*Profile) (*ChatEngine, error) {
 	if contacts == nil {
 		contacts = make([]*Profile, 0)
 	}
+	if len(privateKey) != ed25519.PrivateKeySize || !bytes.Equal(privateKey[32:], me.PublicSigningKey) {
+		// TODO: check that privateKey's public key is the same as public key in Profile,
+		// that it's the correct size, etc.
+		var err error
+		privateKey, me.PublicSigningKey, err = Ed25519KeyPair()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &ChatEngine{
-		Me:       me,
-		Contacts: contacts,
-		Sessions: make([]*Session, 0),
-		Requests: make([]*Request, 0),
-		Events:   make(chan EngineEvent, 16),
-		queue:    make(chan *Message, 16),
+		Me:          me,
+		PrivSignKey: privateKey,
+		Contacts:    contacts,
+		Sessions:    make([]*Session, 0),
+		Requests:    make([]*Request, 0),
+		Events:      make(chan EngineEvent, 16),
+		queue:       make(chan *Message, 16),
 	}, nil
 }
 
@@ -84,7 +98,7 @@ func (eng *ChatEngine) AcceptRequest(request *Request) error {
 		return err
 	}
 
-	err = sess.SendResponse(resp)
+	err = sess.SendResponse(resp, eng.PrivSignKey)
 	if err != nil {
 		return err
 	}
@@ -106,7 +120,7 @@ func (eng *ChatEngine) SendRequest(to *Profile) error {
 		return err
 	}
 
-	err = sess.SendRequest(req)
+	err = sess.SendRequest(req, eng.PrivSignKey)
 	if err != nil {
 		return err
 	}

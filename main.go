@@ -13,6 +13,7 @@ import (
 func main() {
 	meProfile := flag.String("profile", "", "profile")
 	contactsFile := flag.String("contacts", "", "contacts")
+	privKeyFile := flag.String("key", "", "private key")
 	flag.Parse()
 
 	// log stuff
@@ -28,7 +29,7 @@ func main() {
 	log.SetPrefix("  ")
 	enableLog(true)
 
-	app := NewReplApp(*meProfile, *contactsFile, Color(os.Stdout, Green))
+	app := NewReplApp(*meProfile, *contactsFile, *privKeyFile, Color(os.Stdout, Green))
 	app.Run()
 
 	// doing a "bot"

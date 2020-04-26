@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 )
 
@@ -26,7 +27,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 
 				eng.AddRequest(request)
 				// TODO: event to UI
-				log.Printf("got request from %s\n", request.Profile)
+				log.Printf("got request from %s whose true address is %s\n", request.Profile, m.addr)
 
 			case PayloadResponse:
 				resp, err := m.GetResponse()
@@ -36,26 +37,27 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 				}
 
 				// when get response:
-				// 1. find Pending session whose PrivKey can decrypt the shared key.
+				// 1. find session with matching session ID
 				// 2. "upgrade" session to Active. fill in SharedKey and OtherPubKey
 				var sess *Session
 				for _, s := range eng.Sessions {
-					if s == nil {
-						continue
-					}
-					err := s.Upgrade(resp) // upgrade will only work with correct key
-					if err == nil {
+					if s != nil && s.ID == resp.SessionID {
 						sess = s // found correct session
-						// TODO: ?? modify contact list with (potentially) updated Profile?
 						break
 					}
 				}
 
 				if sess != nil {
+					// TODO: ?? modify contact list with (potentially) updated Profile?
 					// TODO: event to UI
-					log.Printf("began session with %s\n", sess.Other)
+					if err := sess.Upgrade(resp); err == nil {
+						log.Printf("began session with %s\n", sess.Other)
+					} else {
+						log.Printf("couldn't upgrade session %d with response from %s: %s\n",
+							sess.ID, resp.Profile, err)
+					}
 				} else {
-					log.Printf("no session found for Response from %s\n", resp.Request.Profile)
+					log.Printf("no session found for Response from %s\n", resp.Profile)
 				}
 
 			case PayloadText:
@@ -78,6 +80,7 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 						text = t
 						break
 					}
+					fmt.Println("msg_processor/gettext", err)
 				}
 
 				if sess != nil {

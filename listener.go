@@ -54,6 +54,7 @@ func (eng *ChatEngine) Listener(ctx context.Context) error {
 // processData transforms []byte to Message and enqueues it for processing.
 func processData(b []byte, addr string, msgQueue chan *Message) {
 	var m Message
+	m.addr = addr
 
 	buf := bytes.NewBuffer(b)
 	dec := gob.NewDecoder(buf)

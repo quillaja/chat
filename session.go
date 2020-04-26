@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"time"
 )
@@ -43,15 +45,17 @@ func InitiateSession(me, other *Profile) (*Session, *Request, error) {
 		return nil, nil, fmt.Errorf("nil Profile")
 	}
 
-	req, privKey, err := PrepareRequest(me)
+	req, sessPrivKey, err := PrepareRequest(me)
 	s := &Session{
-		Status:  Pending,
-		PrivKey: privKey,
-		Me:      me,
-		Other:   other,
-		Expires: time.Now().Add(SessionIdleTimeout),
-		Msgs:    make([]*Text, 0),
-		// will not know SharedKey or OtherPubKey until received Response
+		Status:         Pending,
+		ID:             binary.LittleEndian.Uint64(req.PublicSessionKey),
+		SessionPubKey:  req.PublicSessionKey,
+		SessionPrivKey: sessPrivKey,
+		Me:             me,
+		Other:          other,
+		Expires:        time.Now().Add(SessionIdleTimeout),
+		Msgs:           make([]*Text, 0),
+		// will not know SharedKey until received Response
 	}
 
 	return s, req, err
@@ -67,39 +71,33 @@ func BeginSession(me *Profile, req *Request) (*Session, *Response, error) {
 		return nil, nil, fmt.Errorf("request is stale")
 	}
 
-	respReq, privKey, err := PrepareRequest(me)
+	respReq, sessPrivKey, err := PrepareRequest(me)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	k, err := GenerateAES256Key()
-	if err != nil {
-		return nil, nil, err
-	}
-	encKey, err := RSAEncrypt(k, req.PublicSigningKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	signature, err := SignRSA512(encKey, privKey)
+	sharedKey, err := EDHSharedKey(sessPrivKey, req.PublicSessionKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	resp := &Response{
-		Request:      respReq,
-		SharedKey:    encKey,
-		KeySignature: signature,
+		SessionID:        binary.LittleEndian.Uint64(req.PublicSessionKey),
+		Profile:          me,
+		PublicSessionKey: respReq.PublicSessionKey,
+		TimeStamp:        Now(),
 	}
 
 	s := &Session{
-		Status:      Active,
-		PrivKey:     privKey,
-		SharedKey:   k,
-		Me:          me,
-		Other:       req.Profile,
-		OtherPubKey: req.PublicSigningKey,
-		Expires:     time.Now().Add(SessionIdleTimeout),
-		Msgs:        make([]*Text, 0),
+		Status:         Active,
+		ID:             resp.SessionID,
+		SessionPubKey:  resp.PublicSessionKey,
+		SessionPrivKey: sessPrivKey,
+		SharedKey:      sharedKey,
+		Me:             me,
+		Other:          req.Profile,
+		Expires:        time.Now().Add(SessionIdleTimeout),
+		Msgs:           make([]*Text, 0),
 	}
 
 	return s, resp, err
@@ -115,10 +113,12 @@ func (s *Session) IsExpired() bool { return time.Now().After(s.Expires) }
 
 // String representation of the session.
 func (s *Session) String() string {
-	return fmt.Sprintf("[%s] %s\tleft: %s\tkey: %s",
-		s.Status, s.Other,
+	return fmt.Sprintf("[%s][%d] %s\tleft: %s\n\tshared key:  %s\n\tpublic key:  %s\n\tprivate key: %s",
+		s.Status, s.ID, s.Other,
 		time.Until(s.Expires),
-		base64.RawStdEncoding.EncodeToString(s.SharedKey))
+		base64.RawStdEncoding.EncodeToString(s.SharedKey),
+		base64.RawStdEncoding.EncodeToString(s.SessionPubKey),
+		base64.RawStdEncoding.EncodeToString(s.SessionPrivKey))
 }
 
 // Equal compares sessions based on fields: Status, Expires, SharedKey, and Other.
@@ -131,8 +131,8 @@ func (s *Session) Equal(o *Session) bool {
 }
 
 // Upgrade attempts to use the Response to change a "pending" session into an
-// "active" session. It does so by trying to decrypt the shared key in Response
-// using the session's private RSA key. Any error results in a failure to upgrade
+// "active" session. It does so by creating a shared key from a private key
+// and the received public key. Any error results in a failure to upgrade
 // and the session is not modified.
 func (s *Session) Upgrade(resp *Response) error {
 	if resp == nil {
@@ -142,20 +142,16 @@ func (s *Session) Upgrade(resp *Response) error {
 		return fmt.Errorf("session is not Pending")
 	}
 
-	sharedKey, err := RSADecrypt(resp.SharedKey, s.PrivKey)
+	sharedKey, err := EDHSharedKey(s.SessionPrivKey, resp.PublicSessionKey)
 	if err != nil {
 		return err
-	}
-	if !ValidSignatureRSA512(resp.KeySignature, resp.SharedKey, resp.Request.PublicSigningKey) {
-		return fmt.Errorf("invalid signature")
 	}
 
 	// shared key is now decrypted and the signature is valid
 	// upgrade session
 	s.Status = Active
 	s.SharedKey = sharedKey
-	s.OtherPubKey = resp.Request.PublicSigningKey
-	s.Other = resp.Request.Profile
+	s.Other = resp.Profile
 
 	s.ExtendExpiration()
 	return nil
@@ -194,8 +190,8 @@ func (s *Session) SendText(message string) error {
 // SendRequest does the routine work of sending chat request from one client
 // to another. This includes packaging a Request into a Message and actually
 // sending the Message on the network.
-func (s *Session) SendRequest(req *Request) error {
-	m, err := PackageRequest(req)
+func (s *Session) SendRequest(req *Request, privSigningKey ed25519.PrivateKey) error {
+	m, err := PackageRequest(req, privSigningKey)
 	if err != nil {
 		return err
 	}
@@ -206,9 +202,8 @@ func (s *Session) SendRequest(req *Request) error {
 // SendResponse does the routine work of sending a chat acceptance from one client
 // to another. This includes packaging a Response into a Message and actually
 // sending the Message on the network.
-func (s *Session) SendResponse(resp *Response) error {
-
-	m, err := PackageResponse(resp)
+func (s *Session) SendResponse(resp *Response, privSigningKey ed25519.PrivateKey) error {
+	m, err := PackageResponse(resp, privSigningKey)
 	if err != nil {
 		return err
 	}

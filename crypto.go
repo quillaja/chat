@@ -203,10 +203,10 @@ func Curve25519KeyPair() (private, public []byte, err error) {
 	return
 }
 
-// SharedKey creates a Diffie-Hellman shared key using a private key and public key.
+// EDHSharedKey creates a Diffie-Hellman shared key using a private key and public key.
 //
 // From: https://asecuritysite.com/encryption/go_25519ecdh
-func SharedKey(myPrivKey, theirPubKey []byte) ([]byte, error) {
+func EDHSharedKey(myPrivKey, theirPubKey []byte) ([]byte, error) {
 	return curve25519.X25519(myPrivKey, theirPubKey)
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -32,7 +33,7 @@ type ReplApp struct {
 // profile/contacts input file
 // output & log config
 // prompt/console config
-func NewReplApp(meProfileFile, contactsFile string, output io.Writer) App {
+func NewReplApp(meProfileFile, contactsFile, privateKeyFile string, output io.Writer) App {
 	ui := new(ReplApp)
 	ui.meProfileFile = meProfileFile
 	ui.contactsFile = contactsFile
@@ -50,8 +51,13 @@ func NewReplApp(meProfileFile, contactsFile string, output io.Writer) App {
 		log.Println(err)
 	}
 
+	privKey, err := ReadPrivateKey(privateKeyFile)
+	if err != nil {
+		log.Println(err)
+	}
+
 	// setup engine
-	ui.engine, err = NewChatEngine(me, contacts)
+	ui.engine, err = NewChatEngine(privKey, me, contacts)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -275,7 +281,10 @@ func (ui *ReplApp) evalLine(line string) (quit bool) {
 	case "me":
 		switch cmd = *cmd.leaf(); cmd.cmd {
 		case "show":
-			fmt.Fprintf(output, "I am \"%s\"\n", engine.Me)
+			fmt.Fprintf(output, "I am \"%s\"\nPubKey:  %s\nPrivKey: %s\n",
+				engine.Me,
+				base64.RawStdEncoding.EncodeToString(engine.Me.PublicSigningKey),
+				base64.RawStdEncoding.EncodeToString(engine.PrivSignKey))
 
 		case "edit":
 			p, err := ParseProfile(cmd.args[0])
@@ -284,6 +293,7 @@ func (ui *ReplApp) evalLine(line string) (quit bool) {
 				return
 			}
 
+			p.PublicSigningKey = engine.Me.PublicSigningKey // preserve key
 			err = WriteProfile(p, meProfileFile)
 			if err != nil {
 				log.Println(err)
@@ -298,7 +308,8 @@ func (ui *ReplApp) evalLine(line string) (quit bool) {
 		case "list":
 			for i, c := range engine.Contacts {
 				if c != nil {
-					fmt.Fprintf(output, "%d\t%s\n", i, c)
+					fmt.Fprintf(output, "%d\t%s\t%s\n", i, c,
+						base64.RawStdEncoding.EncodeToString(c.PublicSigningKey))
 				}
 			}
 
