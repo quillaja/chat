@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -113,12 +112,16 @@ func (s *Session) IsExpired() bool { return time.Now().After(s.Expires) }
 
 // String representation of the session.
 func (s *Session) String() string {
-	return fmt.Sprintf("[%s][%d] %s\tleft: %s\n\tshared key:  %s\n\tpublic key:  %s\n\tprivate key: %s",
+	return fmt.Sprintf("[%s][%d] %s\tleft: %s",
 		s.Status, s.ID, s.Other,
-		time.Until(s.Expires),
-		base64.RawStdEncoding.EncodeToString(s.SharedKey),
-		base64.RawStdEncoding.EncodeToString(s.SessionPubKey),
-		base64.RawStdEncoding.EncodeToString(s.SessionPrivKey))
+		time.Until(s.Expires))
+	// excessive detail debug version
+	// return fmt.Sprintf("[%s][%d] %s\tleft: %s\n\t\tshared key:  %s\n\t\tpublic key:  %s\n\t\tprivate key: %s",
+	// 	s.Status, s.ID, s.Other,
+	// 	time.Until(s.Expires),
+	// 	base64.RawStdEncoding.EncodeToString(s.SharedKey),
+	// 	base64.RawStdEncoding.EncodeToString(s.SessionPubKey),
+	// 	base64.RawStdEncoding.EncodeToString(s.SessionPrivKey))
 }
 
 // Equal compares sessions based on fields: Status, Expires, SharedKey, and Other.

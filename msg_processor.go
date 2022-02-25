@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 )
 
@@ -80,7 +79,6 @@ func (eng *ChatEngine) MessageProcessor(ctx context.Context) {
 						text = t
 						break
 					}
-					fmt.Println("msg_processor/gettext", err)
 				}
 
 				if sess != nil {

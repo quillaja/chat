@@ -2,3 +2,6 @@ chat
 *.json
 *.txt
 *.md
+*.contacts
+*.privkey
+*.profile

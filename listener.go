@@ -21,11 +21,12 @@ func (eng *ChatEngine) Listener(ctx context.Context) error {
 	}
 
 	conn, err := net.ListenUDP("udp", listenAddress)
-	defer conn.Close()
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
+	log.Printf("listening on %s\n", eng.Me.Port)
 	var done bool
 	for !done {
 		select {
