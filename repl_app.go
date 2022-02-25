@@ -20,12 +20,13 @@ type App interface {
 
 // ReplApp is an App that provides a REPL shell for user interaction.
 type ReplApp struct {
-	commands      commanddefs
-	console       *Console
-	engine        *ChatEngine
-	output        io.Writer
-	meProfileFile string
-	contactsFile  string
+	commands       commanddefs
+	console        *Console
+	engine         *ChatEngine
+	output         io.Writer
+	meProfileFile  string
+	contactsFile   string
+	privateKeyFile string
 }
 
 // NewReplApp creates a new App.
@@ -37,6 +38,7 @@ func NewReplApp(meProfileFile, contactsFile, privateKeyFile string, output io.Wr
 	ui := new(ReplApp)
 	ui.meProfileFile = meProfileFile
 	ui.contactsFile = contactsFile
+	ui.privateKeyFile = privateKeyFile
 	ui.output = output
 	ui.setupCommands()
 
@@ -249,6 +251,7 @@ func (ui *ReplApp) evalLine(line string) (quit bool) {
 	output := ui.output
 	meProfileFile := ui.meProfileFile
 	contactsFile := ui.contactsFile
+	privateKeyFile := ui.privateKeyFile
 
 	// parse raw line into command struct
 	cmd := cmds.parse(line)
@@ -300,6 +303,12 @@ func (ui *ReplApp) evalLine(line string) (quit bool) {
 				return
 			}
 			engine.Me = p
+
+			err = WritePrivateKey(engine.PrivSignKey, privateKeyFile)
+			if err != nil {
+				log.Println(err)
+				return
+			}
 		}
 
 	case "contacts":
